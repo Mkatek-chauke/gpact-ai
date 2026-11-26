@@ -1,0 +1,72 @@
+[
+    {
+        "id":  "records-policy-v2",
+        "title":  "Public Records Management Policy",
+        "section":  "4.2 — Retention and disposal",
+        "version":  "2.0",
+        "status":  "Current",
+        "classification":  "Public",
+        "owner":  "Office of the Chief Information Officer",
+        "date":  "2025-03-01",
+        "repository":  "Policy Library",
+        "document_type":  "Policy",
+        "text":  "4.1 Records ownership\nEach department must designate a records officer responsible for managing official records throughout their lifecycle.\n\n4.2 Retention and disposal\nOfficial records must be retained for the period in the approved departmental records schedule. A record must not be destroyed while subject to an audit, investigation, litigation hold, or access request. Disposal must be authorised by the records officer and recorded in the disposal register.\n\n4.3 Digital records\nDigital records must preserve authenticity, integrity, and accessibility. Departments should maintain a documented backup and recovery process.",
+        "clearance_rank":  0
+    },
+    {
+        "id":  "records-policy-v1",
+        "title":  "Public Records Management Policy",
+        "section":  "4.2 — Retention and disposal",
+        "version":  "1.0",
+        "status":  "Superseded",
+        "classification":  "Public",
+        "owner":  "Office of the Chief Information Officer",
+        "date":  "2022-01-15",
+        "repository":  "Policy Library",
+        "document_type":  "Policy",
+        "text":  "4.1 Records ownership\nDepartments should designate a records contact to manage official records.\n\n4.2 Retention and disposal\nRecords should be retained under the departmental schedule. Disposal should be approved and recorded. This version has been superseded by version 2.0.",
+        "clearance_rank":  0
+    },
+    {
+        "id":  "procurement-circular-2025",
+        "title":  "Circular 07/2025: Procurement Planning",
+        "section":  "3 — Annual procurement plans",
+        "version":  "1.0",
+        "status":  "Current",
+        "classification":  "Public",
+        "owner":  "National Treasury (simulated)",
+        "date":  "2025-07-10",
+        "repository":  "Government Gazette",
+        "document_type":  "Circular",
+        "text":  "1. Purpose\nThis circular provides a sample planning procedure for departments.\n\n3. Annual procurement plans\nEach accounting officer should ensure that an annual procurement plan is prepared before the start of the financial year. The plan should identify anticipated requirements, estimated timelines, and budget alignment. Material changes should be documented and approved under the department\u0027s delegation framework.\n\n4. Publication\nDepartments should publish non-sensitive procurement opportunities through their designated public channels.",
+        "clearance_rank":  0
+    },
+    {
+        "id":  "ai-governance-framework",
+        "title":  "Responsible Use of AI Framework",
+        "section":  "5 — Human oversight",
+        "version":  "1.1",
+        "status":  "Current",
+        "classification":  "Internal",
+        "owner":  "Digital Government Office (simulated)",
+        "date":  "2025-09-01",
+        "repository":  "Policy Library",
+        "document_type":  "Framework",
+        "text":  "1. Scope\nThis synthetic framework applies to departmental pilots that use AI to support public-sector work.\n\n3. Transparency\nUsers must be informed when AI contributes to content or analysis. Outputs must be traceable to their source material and limitations must be explained.\n\n5. Human oversight\nAI may support analysis but must not make or communicate a final administrative decision on behalf of an authorised official. An accountable official must review material outputs before use.\n\n6. Privacy\nTeams should minimise personal information used in prompts, datasets, and operational logs. Personal information must be handled under applicable privacy requirements and approved departmental controls.",
+        "clearance_rank":  1
+    },
+    {
+        "id":  "travel-guidance-draft",
+        "title":  "Draft Travel Approval Guidance",
+        "section":  "2 — Approval",
+        "version":  "0.3-draft",
+        "status":  "Draft",
+        "classification":  "Internal",
+        "owner":  "Corporate Services (simulated)",
+        "date":  "2025-10-15",
+        "repository":  "Department Intranet (simulated)",
+        "document_type":  "Guidance",
+        "text":  "2. Approval\nDraft for consultation only. Proposed domestic travel should be approved by a delegated manager before booking. This draft has not been approved and must not be treated as an operative departmental policy.",
+        "clearance_rank":  1
+    }
+]
