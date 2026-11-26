@@ -8,6 +8,7 @@ from unittest.mock import patch
 import app as application
 import rag
 import govza
+import storage
 
 
 class AssistantApiTests(unittest.TestCase):
@@ -137,6 +138,14 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(title, "Public Administration Act 7 of 2025")
         self.assertEqual(date, "01 Apr 2026")
         self.assertEqual(pdf_links, ["https://www.gov.za/sites/default/files/gcis_document/202604/public-administration.pdf"])
+
+    def test_postgres_connection_is_optional_and_reads_neon_env(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(storage.database_url())
+        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://pooled.example/db"}):
+            self.assertEqual(storage.database_url(), "postgresql://pooled.example/db")
+        with patch.dict(os.environ, {"NEON_DATABASE_URL": "postgresql://neon.example/db"}, clear=True):
+            self.assertEqual(storage.database_url(), "postgresql://neon.example/db")
 
     def test_text_upload_is_indexed_with_metadata(self):
         response = self.client.post(

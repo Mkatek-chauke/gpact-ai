@@ -1,5 +1,10 @@
 .venv/
 __pycache__/
 *.py[cod]
+.env
+.env.*
+!.env.example
 uploads/*
 !uploads/.gitkeep
+.neon
+node_modules/

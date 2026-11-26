@@ -1,10 +1,10 @@
 # GPACT AI — Government Knowledge & Policy Assistant
 
-A runnable, local-first demonstration of a source-grounded government policy assistant. It includes a conversational interface, citations linked to source documents, version/status warnings, simulated repositories, classification-aware retrieval, document ingestion, and optional Groq and Neo4j integrations.
+A runnable demonstration of a source-grounded government policy assistant. It includes a conversational interface, citations linked to source documents, version/status warnings, simulated repositories, classification-aware retrieval, and public document ingestion.
 
 > **Demo safety:** The included corpus is synthetic/public-style sample content. Do not upload classified, confidential, or personal information. The identity/clearance selector is for demonstration only; production deployments must use trusted SSO identity and centrally enforced MISS access controls. This assistant informs users and does not make government decisions.
 
-## Run locally
+## Run locally with the JSON store
 
 ```powershell
 py -m venv .venv
@@ -13,22 +13,26 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open [http://127.0.0.1:5000](http://127.0.0.1:5000). The app works without external service credentials using its local corpus and extractive answers.
+Open [http://127.0.0.1:5000](http://127.0.0.1:5000). Without `DATABASE_URL`, the app uses the local JSON corpus and extractive answers.
 
-## Optional integrations
+## Use Neon Postgres as the document store
 
-Set environment variables before starting the app:
+Neon is a hosted Postgres service. Once the Neon project is linked and deployed, Neon supplies a Postgres connection string through `DATABASE_URL`. Install the Python driver and load that value into your process environment:
 
 ```powershell
-$env:GROQ_API_KEY = "your-key"
-$env:GROQ_MODEL = "llama-3.3-70b-versatile"
-$env:NEO4J_URI = "bolt://localhost:7687"
-$env:NEO4J_USERNAME = "neo4j"
-$env:NEO4J_PASSWORD = "your-password"
+pip install -r requirements.txt
+neon env pull
+$env:DATABASE_URL = (Get-Content .env.local | Where-Object { $_ -match '^DATABASE_URL=' } | Select-Object -First 1).Split('=', 2)[1].Trim('"')
 python app.py
 ```
 
-Groq is used only to phrase answers from retrieved excerpts; source references are validated and unsupported/unreferenced output falls back to extractive answers. Neo4j receives document and chunk metadata when configured. The JSON corpus remains the local source of truth.
+If Neon writes the URL to `.env`, use that file instead. Keep `.env` and `.env.local` private; they are gitignored. The app creates a `government_documents` table, seeds it from the included JSON corpus when the database is empty, and then reads/writes documents in Postgres. Without a Neon URL it falls back to the local JSON store. Use a Neon pooled connection string for web deployments.
+
+The Neon project is linked to organization `org-tiny-salad-44594756`, project `crimson-voice-69979260`, branch `production`; `neon.ts` has no paid services or branch policies configured.
+
+## Optional Groq and Neo4j integrations
+
+These are not required for Neon Postgres or for the local extractive-answer mode. Neo4j remains an optional metadata mirror; Groq is used only for eligible public-source answer phrasing.
 
 ## Included features
 

@@ -13,14 +13,18 @@ from urllib.error import URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
 from integrations import save_chunks_to_neo4j
 from rag import PERSONAL_DATA_RE, answer_question, make_chunks
 from govza import CATEGORIES as GOVZA_CATEGORIES, import_category
+import storage
 
 ROOT = Path(__file__).resolve().parent
+load_dotenv(ROOT / ".env")
+load_dotenv(ROOT / ".env.local")
 DATA_FILE = ROOT / "data" / "documents.json"
 UPLOAD_DIR = ROOT / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -43,14 +47,24 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 
 
 def load_documents():
-    with lock:
-        documents = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+    if storage.database_url():
+        documents = storage.load_documents()
+        if not documents:
+            with lock:
+                documents = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+            storage.save_documents(documents)
+    else:
+        with lock:
+            documents = json.loads(DATA_FILE.read_text(encoding="utf-8"))
     for document in documents:
         document["clearance_rank"] = CLEARANCES.get(document.get("classification"), len(CLEARANCES))
     return documents
 
 
 def save_documents(documents):
+    if storage.database_url():
+        storage.save_documents(documents)
+        return
     with lock:
         temporary = DATA_FILE.with_suffix(".tmp")
         temporary.write_text(json.dumps(documents, ensure_ascii=False, indent=2), encoding="utf-8")
