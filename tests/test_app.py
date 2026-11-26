@@ -18,9 +18,15 @@ class AssistantApiTests(unittest.TestCase):
         self.data_path.write_text(application.DATA_FILE.read_text(encoding="utf-8"), encoding="utf-8")
         self.data_file_patch = patch.object(application, "DATA_FILE", self.data_path)
         self.data_file_patch.start()
+        self.database_url_patch = patch.object(storage, "database_url", return_value=None)
+        self.database_url_patch.start()
+        self.groq_key_patch = patch.dict(os.environ, {"GROQ_API_KEY": ""}, clear=False)
+        self.groq_key_patch.start()
         self.client = application.app.test_client()
 
     def tearDown(self):
+        self.groq_key_patch.stop()
+        self.database_url_patch.stop()
         self.data_file_patch.stop()
         self.temporary.cleanup()
 
@@ -140,12 +146,38 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(pdf_links, ["https://www.gov.za/sites/default/files/gcis_document/202604/public-administration.pdf"])
 
     def test_postgres_connection_is_optional_and_reads_neon_env(self):
-        with patch.dict(os.environ, {}, clear=True):
-            self.assertIsNone(storage.database_url())
-        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://pooled.example/db"}):
-            self.assertEqual(storage.database_url(), "postgresql://pooled.example/db")
-        with patch.dict(os.environ, {"NEON_DATABASE_URL": "postgresql://neon.example/db"}, clear=True):
-            self.assertEqual(storage.database_url(), "postgresql://neon.example/db")
+        self.database_url_patch.stop()
+        try:
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertIsNone(storage.database_url())
+            with patch.dict(os.environ, {"DATABASE_URL": "postgresql://pooled.example/db"}, clear=True):
+                self.assertEqual(storage.database_url(), "postgresql://pooled.example/db")
+            with patch.dict(os.environ, {
+                "DATABASE_URL": "postgresql://direct.example/db",
+                "DATABASE_URL_POOLED": "postgresql://pooled.example/db",
+            }, clear=True):
+                self.assertEqual(storage.database_url(), "postgresql://pooled.example/db")
+            with patch.dict(os.environ, {"NEON_DATABASE_URL": "postgresql://neon.example/db"}, clear=True):
+                self.assertEqual(storage.database_url(), "postgresql://neon.example/db")
+        finally:
+            self.database_url_patch.start()
+
+    def test_vercel_ingestion_requires_persistent_database(self):
+        with patch.dict(os.environ, {"VERCEL": "1"}, clear=False), patch.object(storage, "database_url", return_value=None):
+            response = self.client.post("/api/ingest-url", json={"url": "http://localhost"})
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("DATABASE_URL", response.get_json()["error"])
+
+    def test_public_assets_are_served_from_vercel_public_directory(self):
+        script = self.client.get("/static/app.js")
+        stylesheet = self.client.get("/static/styles.css")
+        try:
+            self.assertEqual(script.status_code, 200)
+            self.assertIn(b"function ask", script.data)
+            self.assertEqual(stylesheet.status_code, 200)
+        finally:
+            script.close()
+            stylesheet.close()
 
     def test_text_upload_is_indexed_with_metadata(self):
         response = self.client.post(

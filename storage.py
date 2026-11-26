@@ -3,7 +3,11 @@ import os
 
 
 def database_url():
-    return os.getenv("DATABASE_URL") or os.getenv("NEON_DATABASE_URL")
+    return (
+        os.getenv("DATABASE_URL_POOLED")
+        or os.getenv("DATABASE_URL")
+        or os.getenv("NEON_DATABASE_URL")
+    )
 
 
 def _connect():

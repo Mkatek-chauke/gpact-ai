@@ -17,7 +17,7 @@ Open [http://127.0.0.1:5000](http://127.0.0.1:5000). Without `DATABASE_URL`, the
 
 ## Use Neon Postgres as the document store
 
-Neon is a hosted Postgres service. Once the Neon project is linked and deployed, Neon supplies a Postgres connection string through `DATABASE_URL`. Install the Python driver and load that value into your process environment:
+Neon is a hosted Postgres service. Configure the full Neon pooled Postgres connection URI as `DATABASE_URL_POOLED` (preferred) or `DATABASE_URL`. The URI should include the `postgresql://` scheme, database role, password, host, and database name. Install the Python driver and load the value into your process environment:
 
 ```powershell
 pip install -r requirements.txt
@@ -29,6 +29,14 @@ python app.py
 If Neon writes the URL to `.env`, use that file instead. Keep `.env` and `.env.local` private; they are gitignored. The app creates a `government_documents` table, seeds it from the included JSON corpus when the database is empty, and then reads/writes documents in Postgres. Without a Neon URL it falls back to the local JSON store. Use a Neon pooled connection string for web deployments.
 
 The Neon project is linked to organization `org-tiny-salad-44594756`, project `crimson-voice-69979260`, branch `production`; `neon.ts` has no paid services or branch policies configured.
+
+## Deploy on Vercel
+
+The repo includes `vercel.json`, a Flask/Python entrypoint, and CDN-served assets under `public/static/`. In Vercel's **New Project** screen, select this GitHub repo, keep Root Directory as `./`, choose the **Flask** preset, leave Output Directory blank, and deploy. The configured Build Command is `npm run build`.
+
+For persistent uploads and gov.za imports, connect Neon Postgres to the Vercel project or add the Neon **pooled** connection string as the `DATABASE_URL` environment variable in Vercel Project Settings → Environment Variables, for Production and Preview as appropriate. Redeploy after adding/changing it. Never commit or paste `.env` values into source code. Without `DATABASE_URL`, chat can use the bundled sample corpus, but serverless ingestion returns HTTP 503 rather than attempting to write to Vercel's temporary filesystem.
+
+Vercel hosting and Neon are cloud services; requests and any indexed public documents are processed/stored off your laptop. Only use public or approved material. Do not deploy classified or confidential information.
 
 ## Optional Groq and Neo4j integrations
 

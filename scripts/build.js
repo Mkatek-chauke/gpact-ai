@@ -9,9 +9,10 @@ const requiredFiles = [
   "govza.py",
   "rag.py",
   "neon.ts",
+  "vercel.json",
   "templates/index.html",
-  "static/app.js",
-  "static/styles.css",
+  "public/static/app.js",
+  "public/static/styles.css",
   "data/documents.json",
 ];
 
@@ -28,7 +29,7 @@ if (!Array.isArray(corpus) || corpus.length === 0) {
   process.exit(1);
 }
 
-const js = spawnSync(process.execPath, ["--check", path.join(root, "static/app.js")], {
+const js = spawnSync(process.execPath, ["--check", path.join(root, "public/static/app.js")], {
   encoding: "utf8",
 });
 if (js.status !== 0) {

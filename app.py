@@ -5,6 +5,7 @@ import os
 import re
 import socket
 import threading
+import tempfile
 import uuid
 from datetime import date
 from html.parser import HTMLParser
@@ -26,13 +27,27 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 load_dotenv(ROOT / ".env.local")
 DATA_FILE = ROOT / "data" / "documents.json"
-UPLOAD_DIR = ROOT / "uploads"
+UPLOAD_DIR = Path(tempfile.gettempdir()) / "gpact-ai-uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
-app = Flask(__name__)
+app = Flask(__name__, static_folder=str(ROOT / "public" / "static"), static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 lock = threading.Lock()
+
+
+@app.before_request
+def require_persistent_storage_for_serverless_writes():
+    if (
+        os.getenv("VERCEL")
+        and request.method == "POST"
+        and request.path.startswith("/api/ingest")
+        and not storage.database_url()
+    ):
+        return jsonify({
+            "error": "Document ingestion requires persistent storage on Vercel. Configure DATABASE_URL."
+        }), 503
+
 
 CLEARANCES = {"Public": 0, "Internal": 1, "Confidential": 2, "Secret": 3}
 ROLES = {"Official", "Policy Analyst", "Records Officer", "Administrator"}
