@@ -4,7 +4,30 @@ const conversation = $("#conversation");
 const library = $("#library");
 const input = $("#questionInput");
 const sendButton = $("#sendButton");
-const state = { history: [], user: null, csrfToken: "", busy: false };
+const state = {
+  history: [],
+  recentSearches: [],
+  documents: [],
+  sourceFilters: ["all"],
+  user: null,
+  csrfToken: "",
+  busy: false,
+  demoAuth: false,
+  documentContextId: "",
+  documentContextTitle: "",
+};
+const SOURCE_CATEGORIES = [
+  { name: "Government Websites", icon: "🏛", filter: "department_websites", matches: (doc) => Boolean(doc.source_url || doc.page_url) || /department|intranet/i.test(doc.repository || "") },
+  { name: "Policy Library", icon: "📚", filter: "policies", matches: (doc) => /policy/i.test(doc.repository || "") || doc.document_type === "Policy" },
+  { name: "Government Gazette", icon: "📄", filter: "gazettes", matches: (doc) => /gazette/i.test(doc.repository || "") },
+  { name: "Legislation", icon: "⚖", filter: "legislation", matches: (doc) => /\b(act|bill|legislation|regulation|statute)\b/i.test(`${doc.title} ${doc.document_type}`) },
+  { name: "NSFAS Information", icon: "🎓", filter: "grants_benefits", matches: (doc) => /\bnsfas\b/i.test(`${doc.title} ${doc.document_type}`) },
+  { name: "Housing Programmes", icon: "🏠", filter: "grants_benefits", matches: (doc) => /\bhousing\b/i.test(`${doc.title} ${doc.document_type}`) },
+  { name: "SASSA Grants", icon: "👶", filter: "grants_benefits", matches: (doc) => /\b(sassa|grant|grants|social assistance)\b/i.test(`${doc.title} ${doc.document_type}`) },
+  { name: "Employment & Labour", icon: "💼", filter: "department_websites", matches: (doc) => /\b(employment|labour|leave|workplace)\b/i.test(`${doc.title} ${doc.document_type} ${doc.owner}`) },
+  { name: "Water & Sanitation", icon: "🚰", filter: "department_websites", matches: (doc) => /\b(water|sanitation)\b/i.test(`${doc.title} ${doc.document_type} ${doc.owner}`) },
+  { name: "Health Services", icon: "🏥", filter: "department_websites", matches: (doc) => /\b(health|medical|clinic)\b/i.test(`${doc.title} ${doc.document_type} ${doc.owner}`) },
+];
 
 function headers(json = false) {
   const result = {};
@@ -40,11 +63,44 @@ function showToast(message) {
 }
 
 function setView(view) {
+  const views = {
+    welcome,
+    library,
+    sources: $("#sourcesView"),
+    saved: $("#savedView"),
+    recent: $("#recentView"),
+    conversations: $("#conversationsView"),
+  };
   welcome.classList.toggle("hidden", view !== "welcome");
-  conversation.classList.toggle("hidden", view !== "conversation");
-  library.classList.toggle("hidden", view !== "library");
+  Object.entries(views).forEach(([name, element]) => {
+    element.classList.toggle("hidden", name !== view);
+  });
+  const showPortal = view === "conversation" && conversation.children.length === 0;
+  $("#conversationStart").classList.toggle("hidden", !showPortal);
+  conversation.classList.toggle("hidden", view !== "conversation" || showPortal);
   $(".composer-wrap").classList.toggle("hidden", view !== "conversation");
-  $("#headerState").textContent = view === "library" ? "Knowledge library" : view === "conversation" ? "Conversation" : "New conversation";
+  $(".main").classList.toggle("portal-mode", showPortal);
+  const labels = {
+    welcome: "Dashboard",
+    conversation: showPortal ? "Government search" : "Conversation",
+    library: "Policy Library",
+    sources: "Government Sources",
+    saved: "Saved Documents",
+    recent: "Recent Searches",
+    conversations: "Conversations",
+  };
+  $("#headerState").textContent = labels[view] || "Dashboard";
+  document.querySelectorAll(".workspace-nav .nav-item").forEach((item) => item.classList.remove("active"));
+  const activeItems = {
+    welcome: "#dashboardNavigation",
+    conversation: "#conversationsNavigation",
+    library: "#libraryNavigation",
+    sources: "#sourcesNavigation",
+    saved: "#savedNavigation",
+    recent: "#recentNavigation",
+    conversations: "#conversationsNavigation",
+  };
+  if (activeItems[view]) $(activeItems[view]).classList.add("active");
 }
 
 function statusClass(status) {
@@ -54,12 +110,90 @@ function statusClass(status) {
 async function loadDocuments() {
   const response = await fetch("/api/documents", { headers: headers() });
   const data = await readJson(response);
+  state.documents = data.documents;
   $("#documentList").innerHTML = data.documents.map((doc) => `
-    <a class="document-card" href="/api/source/${encodeURIComponent(doc.id)}" target="_blank" rel="noopener">
+    <a class="document-card" href="/documents/${encodeURIComponent(doc.id)}">
       <span><strong>${escapeHtml(doc.title)}</strong><small>${escapeHtml(doc.document_type)} · v${escapeHtml(doc.version)} · ${escapeHtml(doc.owner)} · ${escapeHtml(doc.repository)} · ${escapeHtml(doc.classification)}</small></span>
       <span class="status-pill ${statusClass(doc.status)}">${escapeHtml(doc.status)}</span>
     </a>
   `).join("") || '<p class="library-sub">No documents are available at this access level.</p>';
+  renderSourceCoverage();
+}
+
+function latestIndexedDate(documents) {
+  const timestamps = documents
+    .map((doc) => doc.uploaded_at)
+    .filter((timestamp) => typeof timestamp === "string" && !Number.isNaN(Date.parse(timestamp)))
+    .sort();
+  return timestamps.length
+    ? new Date(timestamps[timestamps.length - 1]).toLocaleDateString()
+    : "Index date unavailable";
+}
+
+function renderSourceCard(category) {
+  const matches = state.documents.filter(category.matches);
+  const lastIndexed = latestIndexedDate(matches);
+  return `
+    <button class="source-card" type="button" data-source-filter="${category.filter}" aria-label="Search ${escapeHtml(category.name)}; ${matches.length} indexed documents">
+      <span class="source-card-icon" aria-hidden="true">${category.icon}</span>
+      <strong>${escapeHtml(category.name)}</strong>
+      <span class="source-card-count">${matches.length} indexed ${matches.length === 1 ? "document" : "documents"}</span>
+      <small>Last indexed: ${escapeHtml(lastIndexed)}</small>
+    </button>
+  `;
+}
+
+function renderSourceCoverage() {
+  $("#sourceCards").innerHTML = SOURCE_CATEGORIES.map(renderSourceCard).join("");
+  $("#allSourceCards").innerHTML = SOURCE_CATEGORIES.map(renderSourceCard).join("");
+  const repositories = new Set(state.documents.map((doc) => doc.repository).filter(Boolean));
+  const categoriesWithContent = SOURCE_CATEGORIES.filter((category) => state.documents.some(category.matches));
+  $("#indexedDocumentCount").textContent = state.documents.length.toLocaleString();
+  $("#indexedRepositoryCount").textContent = repositories.size.toLocaleString();
+  $("#indexedSourceCategoryCount").textContent = categoriesWithContent.length.toLocaleString();
+  $("#indexedUpdatedDate").textContent = latestIndexedDate(state.documents);
+  updateSourceTransparency();
+}
+
+function selectedSourceFilters() {
+  return [...document.querySelectorAll('input[name="sourceFilter"]:checked')].map((checkbox) => checkbox.value);
+}
+
+function updateSourceTransparency() {
+  if (!$("#sourceTransparency")) return;
+  const filters = selectedSourceFilters();
+  const label = filters.includes("all") ? "all indexed source categories" : `${filters.length} selected indexed ${filters.length === 1 ? "category" : "categories"}`;
+  $("#sourceTransparency").textContent = `Searching ${label} · ${state.documents.length} accessible indexed ${state.documents.length === 1 ? "document" : "documents"}`;
+}
+
+function selectSourceFilter(sourceFilter) {
+  const allSources = document.querySelector('input[name="sourceFilter"][value="all"]');
+  const selected = document.querySelector(`input[name="sourceFilter"][value="${sourceFilter}"]`);
+  if (!selected) return;
+  selected.checked = true;
+  if (sourceFilter === "all") {
+    document.querySelectorAll('input[name="sourceFilter"]:not([value="all"])').forEach((checkbox) => { checkbox.checked = false; });
+  } else {
+    allSources.checked = false;
+  }
+  state.sourceFilters = selectedSourceFilters();
+  updateSourceTransparency();
+}
+
+function renderSavedDocuments() {
+  const saved = state.documents.filter((doc) => localStorage.getItem(`gpact-saved-document-${doc.id}`) === "true");
+  $("#savedDocumentList").innerHTML = saved.map((doc) => `
+    <a class="document-card" href="/documents/${encodeURIComponent(doc.id)}">
+      <span><strong>${escapeHtml(doc.title)}</strong><small>${escapeHtml(doc.document_type)} · v${escapeHtml(doc.version)} · ${escapeHtml(doc.repository)}</small></span>
+      <span class="status-pill ${statusClass(doc.status)}">${escapeHtml(doc.status)}</span>
+    </a>
+  `).join("") || '<p class="library-sub">No saved documents on this device.</p>';
+}
+
+function renderRecentSearches() {
+  $("#recentSearchList").innerHTML = state.recentSearches.map((question) => `
+    <button class="recent-search-item" type="button" data-question="${escapeHtml(question)}"><span>${escapeHtml(question)}</span><b>↗</b></button>
+  `).join("") || '<p class="library-sub">No searches in this session yet.</p>';
 }
 
 function addUserMessage(text) {
@@ -74,16 +208,33 @@ function renderAnswer(result) {
   message.className = "message";
   const citedAnswer = escapeHtml(result.answer).replace(/\[(C\d+)\]/g, '<a href="#citation-$1">$1</a>');
   const warnings = result.warnings.map((warning) => `<div class="warning">⚠ ${escapeHtml(warning)}</div>`).join("");
+  const citedDocumentIds = new Set(result.citations.map((citation) => citation.document_id));
   const citations = result.citations.length ? `
-    <div class="citation-panel"><h3>SOURCE DOCUMENTS · ${result.citations.length}</h3>
+    <div class="citation-panel"><h3>SOURCES USED · ${result.citations.length}</h3>
       ${result.citations.map((citation) => `
-        <a class="citation" id="citation-${escapeHtml(citation.ref)}" href="${escapeHtml(citation.source_url && citation.source_url.startsWith("https://") ? citation.source_url : `/api/source/${encodeURIComponent(citation.document_id)}/content`)}" target="_blank" rel="noopener">
+        <a class="citation" id="citation-${escapeHtml(citation.ref)}" href="${escapeHtml(citation.source_url && citation.source_url.startsWith("https://") ? citation.source_url : `/documents/${encodeURIComponent(citation.document_id)}`)}" target="_blank" rel="noopener">
           <span class="cite-ref">${escapeHtml(citation.ref)}</span><span class="cite-details"><strong>${escapeHtml(citation.title)}</strong>
-          <small>${escapeHtml(citation.section)} · v${escapeHtml(citation.version)} · ${escapeHtml(citation.status)} · ${escapeHtml(citation.repository)}${citation.page_url ? ` · Source page: ${escapeHtml(citation.page_url)}` : ""}</small></span>
+          <small>${escapeHtml(citation.section)} · v${escapeHtml(citation.version)} · ${escapeHtml(citation.status)} · ${escapeHtml(citation.repository)} · ${escapeHtml(citation.owner || "Department not specified")}${citation.page_url ? ` · Source page: ${escapeHtml(citation.page_url)}` : ""}</small></span>
         </a>`).join("")}
     </div>` : "";
+  const relatedDocuments = (result.related_documents || []).filter((doc) => !citedDocumentIds.has(doc.id));
+  const related = `
+    <div class="related-panel"><h3>RELATED DOCUMENTS</h3>
+      ${relatedDocuments.length ? relatedDocuments.map((doc) => `
+        <a class="related-document" href="/documents/${encodeURIComponent(doc.id)}">
+          <strong>${escapeHtml(doc.title)}</strong>
+          <small>${escapeHtml(doc.document_type)} · v${escapeHtml(doc.version)} · ${escapeHtml(doc.repository)}</small>
+        </a>`).join("") : '<p>No additional related documents were found in the selected sources.</p>'}
+    </div>`;
+  const confidence = result.confidence_score == null ? "—" : `${result.confidence_score}%`;
+  const department = result.relevant_department || "Not identified in the matched source metadata";
   message.innerHTML = `<div class="assistant-head"><span class="assistant-mark">G</span><strong>GPACT Assistant</strong><small>· ${escapeHtml(result.provider)}</small></div>
-    ${warnings}<div class="answer-text">${citedAnswer}</div>${citations}
+    ${warnings}<div class="answer-panel"><strong>AI Answer</strong><div class="answer-text">${citedAnswer}</div></div>
+    <div class="answer-metrics">
+      <div><small>Confidence Score</small><strong>${confidence}</strong><span>Retrieval match only; not a measure of correctness.</span></div>
+      <div><small>Relevant Government Department</small><strong>${escapeHtml(department)}</strong></div>
+    </div>
+    ${citations}${related}
     <div class="answer-footer">${escapeHtml(result.disclaimer)}</div>`;
   conversation.append(message);
 }
@@ -93,8 +244,13 @@ async function ask(question) {
   state.busy = true;
   sendButton.disabled = true;
   setView("conversation");
+  $("#conversationStart").classList.add("hidden");
+  $(".main").classList.remove("portal-mode");
   $("#library").classList.add("hidden");
+  state.recentSearches = [question, ...state.recentSearches.filter((item) => item !== question)].slice(0, 10);
+  renderRecentSearches();
   addUserMessage(question);
+  setView("conversation");
   const pending = document.createElement("div");
   pending.className = "typing";
   pending.textContent = "Searching authorised sources…";
@@ -104,7 +260,12 @@ async function ask(question) {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: headers(true),
-      body: JSON.stringify({ question, history: state.history }),
+      body: JSON.stringify({
+        question,
+        history: state.history,
+        source_filters: state.sourceFilters,
+        ...(state.documentContextId ? { document_id: state.documentContextId } : {}),
+      }),
     });
     const result = await readJson(response);
     pending.remove();
@@ -135,15 +296,53 @@ function closeModals() {
   document.querySelectorAll(".modal-backdrop").forEach((modal) => modal.classList.add("hidden"));
 }
 
-document.querySelectorAll("[data-question]").forEach((button) => {
-  button.addEventListener("click", () => ask(button.dataset.question));
+document.addEventListener("click", (event) => {
+  const searchButton = event.target.closest("[data-question]");
+  if (searchButton) ask(searchButton.dataset.question);
 });
 $("#newChat").addEventListener("click", () => {
   state.history = [];
+  state.documentContextId = "";
+  state.documentContextTitle = "";
+  sessionStorage.removeItem("gpact-document-context");
+  $("#chatContext").classList.add("hidden");
   conversation.replaceChildren();
-  setView("welcome");
+  setView("conversation");
+});
+$("#dashboardNavigation").addEventListener("click", () => setView("welcome"));
+$("#conversationsNavigation").addEventListener("click", () => setView("conversations"));
+$("#libraryNavigation").addEventListener("click", () => {
+  setView("library");
+  loadDocuments().catch((error) => showToast(error.message));
+});
+$("#sourcesNavigation").addEventListener("click", () => setView("sources"));
+$("#savedNavigation").addEventListener("click", () => {
+  renderSavedDocuments();
+  setView("saved");
+});
+$("#recentNavigation").addEventListener("click", () => {
+  renderRecentSearches();
+  setView("recent");
+});
+$("#settingsNavigation").addEventListener("click", () => {
+  if (state.demoAuth) openModal("#settingsModal");
+  else showToast("Account settings are managed by your department administrator.");
 });
 $("#askQuestion").addEventListener("click", () => {
+  state.history = [];
+  conversation.replaceChildren();
+  state.documentContextId = "";
+  state.documentContextTitle = "";
+  $("#chatContext").classList.add("hidden");
+  setView("conversation");
+  input.focus();
+});
+$("#startSearchFromConversations").addEventListener("click", () => {
+  state.history = [];
+  conversation.replaceChildren();
+  state.documentContextId = "";
+  state.documentContextTitle = "";
+  $("#chatContext").classList.add("hidden");
   setView("conversation");
   input.focus();
 });
@@ -159,6 +358,34 @@ $("#uploadDocuments").addEventListener("click", () => {
   openModal("#ingestModal");
 });
 $("#sendButton").addEventListener("click", () => ask(input.value));
+$("#clearChatContext").addEventListener("click", () => {
+  state.documentContextId = "";
+  state.documentContextTitle = "";
+  $("#chatContext").classList.add("hidden");
+});
+document.querySelectorAll('input[name="sourceFilter"]').forEach((checkbox) => {
+  checkbox.addEventListener("change", () => {
+    if (checkbox.value === "all" && checkbox.checked) {
+      document.querySelectorAll('input[name="sourceFilter"]:not([value="all"])').forEach((item) => { item.checked = false; });
+    } else if (checkbox.value !== "all" && checkbox.checked) {
+      document.querySelector('input[name="sourceFilter"][value="all"]').checked = false;
+    }
+    const checked = document.querySelectorAll('input[name="sourceFilter"]:checked');
+    if (!checked.length) document.querySelector('input[name="sourceFilter"][value="all"]').checked = true;
+    state.sourceFilters = selectedSourceFilters();
+    updateSourceTransparency();
+  });
+});
+document.querySelectorAll("#sourceCards, #allSourceCards").forEach((sourceCards) => {
+  sourceCards.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-source-filter]");
+    if (!card) return;
+    selectSourceFilter(card.dataset.sourceFilter);
+    setView("conversation");
+    input.focus();
+  });
+});
+$("#viewAllSources").addEventListener("click", () => setView("sources"));
 input.addEventListener("input", () => {
   input.style.height = "auto";
   input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
@@ -301,8 +528,25 @@ async function bootstrap() {
   const result = await readJson(response);
   state.user = result.user;
   state.csrfToken = result.csrf_token;
+  state.demoAuth = result.demo;
   updateUserSummary();
   setView("welcome");
+  const savedDocumentContext = sessionStorage.getItem("gpact-document-context");
+  if (savedDocumentContext) {
+    try {
+      const context = JSON.parse(savedDocumentContext);
+      if (typeof context.id === "string" && context.id) {
+        state.documentContextId = context.id;
+        state.documentContextTitle = typeof context.title === "string" ? context.title : "Selected document";
+        $("#chatContextTitle").textContent = state.documentContextTitle;
+        $("#chatContext").classList.remove("hidden");
+        setView("conversation");
+        input.focus();
+      }
+    } finally {
+      sessionStorage.removeItem("gpact-document-context");
+    }
+  }
   await Promise.all([loadDocuments(), loadGovzaCategories()]);
 }
 

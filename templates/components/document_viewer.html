@@ -1,0 +1,68 @@
+{% macro ActionToolbar(document) -%}
+  <nav class="document-toolbar" aria-label="Document actions">
+    <button class="toolbar-button" id="backButton" type="button">← Back</button>
+    <div class="toolbar-actions">
+      <button class="toolbar-button" id="saveButton" type="button" aria-pressed="false">☆ Save</button>
+      <button class="toolbar-button" id="copyLinkButton" type="button">Copy Link</button>
+      <a class="toolbar-button" href="{{ url_for('download_document', document_id=document.id) }}" download>Download</a>
+    </div>
+  </nav>
+{%- endmacro %}
+
+{% macro DocumentHeader(document) -%}
+  <header class="document-header">
+    <div class="document-eyebrow">GOVERNMENT KNOWLEDGE &amp; POLICY ASSISTANT</div>
+    <h1>{{ document.title }}</h1>
+    <div class="document-facts" aria-label="Document details">
+      <span>{{ document.document_type or "Document" }}</span>
+      <span>Version {{ document.version or "—" }}</span>
+      <span>{{ document.owner or "Owner not specified" }}</span>
+      <span class="classification classification-{{ (document.classification or 'unknown')|lower }}">{{ document.classification or "Unclassified" }}</span>
+      <span>Published {{ document.date or "Date not specified" }}</span>
+    </div>
+  </header>
+{%- endmacro %}
+
+{% macro AISummary(key_points) -%}
+  <section class="summary-card" aria-labelledby="summaryTitle">
+    <div class="summary-mark" aria-hidden="true">✦</div>
+    <div>
+      <h2 id="summaryTitle">AI Summary</h2>
+      <p class="summary-caption">Key points extracted from this document</p>
+      {% if key_points %}
+        <ul>{% for point in key_points %}<li>{{ point }}</li>{% endfor %}</ul>
+      {% else %}
+        <p>No summary is available because this document has no readable text.</p>
+      {% endif %}
+    </div>
+  </section>
+{%- endmacro %}
+
+{% macro DocumentContent(blocks) -%}
+  <article class="document-content" aria-labelledby="contentTitle">
+    <h2 id="contentTitle">Document</h2>
+    {% if blocks %}
+      {% for block in blocks %}
+        {% if block.type == "heading" %}
+          <h3><span>{{ block.number }}</span> {{ block.text }}</h3>
+        {% else %}
+          <p>{{ block.text }}</p>
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      <p class="empty-content">This document does not contain readable text.</p>
+    {% endif %}
+  </article>
+{%- endmacro %}
+
+{% macro MetadataCard(document) -%}
+  <aside class="metadata-card" aria-labelledby="metadataTitle">
+    <h2 id="metadataTitle">Sources &amp; Metadata</h2>
+    <dl>
+      <div><dt>Repository</dt><dd>{{ document.repository or "Not specified" }}</dd></div>
+      <div><dt>Version Family</dt><dd>{{ document.version_family or document.title }}</dd></div>
+      <div><dt>Document ID</dt><dd class="document-id">{{ document.id }}</dd></div>
+      <div><dt>Status</dt><dd>{{ document.status or "Not specified" }}</dd></div>
+    </dl>
+  </aside>
+{%- endmacro %}

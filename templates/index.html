@@ -16,7 +16,16 @@
         <span><strong>GPACT <span>AI</span></strong><small>POLICY &amp; GOVERNANCE</small></span>
       </a>
       <div class="side-label">WORKSPACE</div>
-      <button class="nav-item active" id="newChat"><span class="nav-icon">✳</span> Home</button>
+      <nav class="workspace-nav" aria-label="Workspace navigation">
+        <button class="nav-item active" id="dashboardNavigation" title="Dashboard"><span class="nav-icon">⌂</span> Dashboard</button>
+        <button class="nav-item" id="conversationsNavigation" title="Conversations"><span class="nav-icon">◷</span> Conversations</button>
+        <button class="nav-item" id="libraryNavigation" title="Policy Library"><span class="nav-icon">▤</span> Policy Library</button>
+        <button class="nav-item" id="sourcesNavigation" title="Government Sources"><span class="nav-icon">▦</span> Government Sources</button>
+        <button class="nav-item" id="savedNavigation" title="Saved Documents"><span class="nav-icon">☆</span> Saved Documents</button>
+        <button class="nav-item" id="recentNavigation" title="Recent Searches"><span class="nav-icon">◷</span> Recent Searches</button>
+        <button class="nav-item" id="settingsNavigation" title="Settings"><span class="nav-icon">⚙</span> Settings</button>
+      </nav>
+      <button class="nav-item new-chat-link" id="newChat"><span class="nav-icon">＋</span> New search</button>
       <div class="sidebar-bottom">
         <div class="user-summary"><span class="avatar">PS</span><div><strong id="userName">Loading account</strong><small id="accessSummary">Checking access…</small></div>{% if demo_auth_enabled %}<button id="settingsToggle" title="Demo access settings" aria-label="Demo access settings">⚙</button>{% else %}<button id="logoutButton" title="Sign out" aria-label="Sign out">↪</button>{% endif %}</div>
       </div>
@@ -57,10 +66,61 @@
             </div>
           </section>
         </section>
+        <section class="conversation-start hidden" id="conversationStart">
+          <div class="portal-hero">
+            <div class="portal-kicker">GOVERNMENT KNOWLEDGE SEARCH</div>
+            <h1>How can we help you today?</h1>
+            <p>Search policies, legislation, government services, gazettes, grants and public information from official government sources.</p>
+            <p class="portal-empty-state">Ask a question about any South African government policy, service, programme, regulation, grant or legislation.</p>
+            <div class="source-transparency" id="sourceTransparency">Searching authorized indexed sources</div>
+          </div>
+
+          <section class="portal-section source-picker-section" aria-labelledby="sourcePickerTitle">
+            <div class="portal-section-heading">
+              <div><h2 id="sourcePickerTitle">Search Within</h2><p>Choose the indexed source categories to include.</p></div>
+            </div>
+            <div class="source-picker">
+              <label><input type="checkbox" name="sourceFilter" value="all" checked><span>All Government Sources</span></label>
+              <label><input type="checkbox" name="sourceFilter" value="policies"><span>Policies Only</span></label>
+              <label><input type="checkbox" name="sourceFilter" value="gazettes"><span>Government Gazettes</span></label>
+              <label><input type="checkbox" name="sourceFilter" value="legislation"><span>Legislation</span></label>
+              <label><input type="checkbox" name="sourceFilter" value="grants_benefits"><span>Grants &amp; Benefits</span></label>
+              <label><input type="checkbox" name="sourceFilter" value="department_websites"><span>Department Websites</span></label>
+            </div>
+          </section>
+
+          <section class="portal-section" aria-labelledby="sourceCoverageTitle">
+            <div class="portal-section-heading">
+              <div><h2 id="sourceCoverageTitle">Source Coverage</h2><p>Coverage and dates reflect documents currently indexed for your access level.</p></div>
+              <button class="text-button" id="viewAllSources" type="button">View all sources</button>
+            </div>
+            <div class="source-cards" id="sourceCards"></div>
+          </section>
+
+          <section class="portal-section" aria-labelledby="suggestedSearchesTitle">
+            <div class="portal-section-heading"><div><h2 id="suggestedSearchesTitle">Suggested Searches</h2><p>Choose a question to search indexed sources.</p></div></div>
+            <div class="suggested-searches">
+              <button data-question="How do I apply for a child support grant?"><span>How do I apply for a child support grant?</span><b>↗</b></button>
+              <button data-question="What are the NSFAS eligibility requirements?"><span>What are the NSFAS eligibility requirements?</span><b>↗</b></button>
+              <button data-question="Summarize the Public Records Management Policy."><span>Public Records Management Policy</span><b>↗</b></button>
+              <button data-question="What are the water use licence requirements?"><span>Water use licence requirements</span><b>↗</b></button>
+              <button data-question="What procurement regulations are indexed?"><span>Procurement regulations</span><b>↗</b></button>
+              <button data-question="What leave policy requirements are indexed for labour?"><span>Labour leave policy</span><b>↗</b></button>
+            </div>
+          </section>
+
+          <section class="portal-stats" aria-label="Current indexed collection statistics">
+            <div><strong id="indexedDocumentCount">0</strong><span>Indexed Documents</span></div>
+            <div><strong id="indexedRepositoryCount">0</strong><span>Repositories</span></div>
+            <div><strong id="indexedSourceCategoryCount">0</strong><span>Categories with content</span></div>
+            <div><strong id="indexedUpdatedDate">—</strong><span>Latest indexed update</span></div>
+          </section>
+        </section>
         <section class="conversation hidden" id="conversation" aria-live="polite"></section>
         <div class="composer-wrap hidden">
+          <div class="chat-context hidden" id="chatContext"><span>Document context</span><strong id="chatContextTitle"></strong><button id="clearChatContext" type="button" aria-label="Remove document context">×</button></div>
           <div class="composer">
-            <textarea id="questionInput" rows="1" maxlength="2000" placeholder="Ask a policy or governance question..." aria-label="Ask a question"></textarea>
+            <textarea id="questionInput" rows="1" maxlength="2000" placeholder="Search all South African Government information..." aria-label="Search all South African Government information"></textarea>
             <div class="composer-bottom"><span class="input-hint"><span>↵</span> Enter to ask · Shift + Enter for a new line</span><button id="sendButton" class="send-button" aria-label="Send question" disabled><span>↑</span></button></div>
           </div>
           <div class="composer-disclaimer"><span>◇</span> Avoid entering personal or sensitive information. Verify important guidance with the source document.</div>
@@ -69,6 +129,26 @@
           <div class="library-head"><div><div class="eyebrow">YOUR SOURCES</div><h2>Knowledge library</h2></div><button id="libraryAdd" class="primary-button">＋ Add document</button></div>
           <p class="library-sub">Indexed documents you are authorised to access.</p>
           <div id="documentList" class="document-list"></div>
+        </section>
+        <section class="library hidden" id="sourcesView">
+          <div class="library-head"><div><div class="eyebrow">TRANSPARENT COVERAGE</div><h2>Government Sources</h2></div></div>
+          <p class="library-sub">Counts show documents currently indexed and visible to your account. A zero count means the source has not been connected or indexed yet.</p>
+          <div class="source-cards source-cards-full" id="allSourceCards"></div>
+        </section>
+        <section class="library hidden" id="savedView">
+          <div class="library-head"><div><div class="eyebrow">ON THIS DEVICE</div><h2>Saved Documents</h2></div></div>
+          <p class="library-sub">Saved links are stored in this browser only.</p>
+          <div id="savedDocumentList" class="document-list"></div>
+        </section>
+        <section class="library hidden" id="recentView">
+          <div class="library-head"><div><div class="eyebrow">THIS SESSION</div><h2>Recent Searches</h2></div></div>
+          <p class="library-sub">Searches remain in this session and are not saved to the server.</p>
+          <div id="recentSearchList" class="document-list"></div>
+        </section>
+        <section class="library hidden" id="conversationsView">
+          <div class="library-head"><div><div class="eyebrow">CONVERSATIONS</div><h2>Conversation History</h2></div></div>
+          <p class="library-sub">Conversation history is not stored. Start a new search to continue.</p>
+          <button class="primary-button" id="startSearchFromConversations">Start a search <span>→</span></button>
         </section>
       </div>
     </main>

@@ -35,6 +35,10 @@ HISTORICAL_VERSION_RE = re.compile(
     r"\b(?:superseded|previous|older|historical|version\s*\d|v\d)\b",
     re.I,
 )
+DOCUMENT_SUMMARY_RE = re.compile(
+    r"\b(?:summar(?:y|ies|ize|ise|izing|ising)|overview|key\s+points|main\s+points)\b",
+    re.I,
+)
 
 
 def tokenize(text):
@@ -44,23 +48,33 @@ def tokenize(text):
 def make_chunks(document):
     chunks = []
     section = "Document"
-    for paragraph in re.split(r"\n\s*\n", document["text"]):
-        paragraph = paragraph.strip()
+    paragraph = []
+
+    def flush_paragraph():
         if not paragraph:
-            continue
-        lines = paragraph.splitlines()
-        if len(lines) == 1 and (len(lines[0]) < 100 and (
-            re.match(r"^(\d+(\.\d+)*|[A-Z])[\.)]?\s+", lines[0])
-            or lines[0].istitle()
-        )):
-            section = lines[0]
-            continue
-        text = " ".join(line.strip() for line in lines)
+            return
+        text = " ".join(paragraph)
         chunks.append({
             "id": f'{document["id"]}-c{len(chunks) + 1}',
             "text": text,
             "section": section if section != "Document" else document.get("section", "Document"),
         })
+        paragraph.clear()
+
+    for raw_line in document["text"].splitlines():
+        line = raw_line.strip()
+        if not line:
+            flush_paragraph()
+            continue
+        if len(line) < 100 and (
+            re.match(r"^(\d+(\.\d+)*|[A-Z])[\.)]?\s+", line)
+            or line.istitle()
+        ):
+            flush_paragraph()
+            section = line
+            continue
+        paragraph.append(line)
+    flush_paragraph()
     if not chunks and document["text"].strip():
         chunks.append({
             "id": f'{document["id"]}-c1',
@@ -146,13 +160,43 @@ def _fallback_answer(passages):
     )
 
 
+def _document_passages(documents, clearance):
+    passages = []
+    for document in documents:
+        rank = document.get("clearance_rank")
+        if not isinstance(rank, int) or rank > clearance:
+            continue
+        family = document.get("version_family", document.get("title", "").strip().casefold())
+        for chunk in make_chunks(document):
+            passages.append({
+                **chunk,
+                "document_id": document["id"],
+                "title": document["title"],
+                "version_family": family,
+                "version": document["version"],
+                "status": document["status"],
+                "classification": document["classification"],
+                "owner": document["owner"],
+                "date": document["date"],
+                "repository": document["repository"],
+                "document_type": document.get("document_type", "Document"),
+                "source_url": document.get("source_url"),
+                "page_url": document.get("page_url"),
+                "score": 1.0,
+            })
+    selected = passages[:5]
+    for index, item in enumerate(selected, start=1):
+        item["ref"] = f"C{index}"
+    return selected
+
+
 def _all_sentences_cited(answer, passages):
     allowed = {f'[{item["ref"]}]' for item in passages}
     sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", answer) if part.strip()]
     return bool(sentences) and all(any(ref in sentence for ref in allowed) for sentence in sentences)
 
 
-def answer_question(question, history, documents, clearance):
+def answer_question(question, history, documents, clearance, document_context=False):
     if PERSONAL_DATA_RE.search(question) or PERSONAL_DATA_REQUEST_RE.search(question):
         return (
             "I can't help retrieve or disclose personal information. Use an authorised, "
@@ -166,6 +210,9 @@ def answer_question(question, history, documents, clearance):
         if isinstance(item, dict) and item.get("role") == "user" and isinstance(item.get("content"), str)
     )
     passages = rank_passages(f"{follow_up_context} {question}", documents, clearance)
+    is_document_summary = document_context and DOCUMENT_SUMMARY_RE.search(question)
+    if is_document_summary:
+        passages = _document_passages(documents, clearance)
     if DECISION_REQUEST_RE.search(question):
         prefix = (
             "I can't approve, reject, or make a procurement decision. "
@@ -189,7 +236,11 @@ def answer_question(question, history, documents, clearance):
     )
     if safe_for_external_provider:
         try:
-            candidate = groq_answer(question, [], passages)
+            provider_question = (
+                "Summarize the key points of this document using only the supplied excerpts."
+                if is_document_summary else question
+            )
+            candidate = groq_answer(provider_question, [], passages)
             if candidate and _all_sentences_cited(candidate, passages):
                 answer = candidate
                 provider = "Groq"

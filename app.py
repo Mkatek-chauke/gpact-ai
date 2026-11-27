@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 import psycopg
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
@@ -96,6 +96,14 @@ RATE_LIMITS = {
     "ingest_url": (10, 60),
     "ingest_govza": (5, 60),
     "ingest_department": (5, 60),
+}
+SOURCE_FILTERS = {
+    "all",
+    "policies",
+    "gazettes",
+    "legislation",
+    "grants_benefits",
+    "department_websites",
 }
 
 LOCAL_RESET_TOKENS = {}
@@ -635,39 +643,143 @@ def list_documents():
 
 @app.get("/api/source/<document_id>")
 def get_source(document_id):
-    clearance = effective_clearance()
-    if clearance is None:
+    if "text/html" in request.headers.get("Accept", "").lower():
+        return redirect(url_for("document_viewer", document_id=document_id))
+    document, status = authorized_source(document_id, "source_access")
+    if status == 403:
         return jsonify({"error": "Sign in with an authorized department account."}), 403
-    document = next((item for item in load_documents() if item["id"] == document_id), None)
-    if (
-        not document
-        or not isinstance(document.get("clearance_rank"), int)
-        or document["clearance_rank"] > clearance
-    ):
-        audit_event("source_access", document_id, "denied")
+    if status == 404:
         return jsonify({"error": "Source not found or not authorised."}), 404
-    audit_event("source_access", document_id)
     return jsonify({key: value for key, value in document.items() if key != "clearance_rank"})
 
 
 @app.get("/api/source/<document_id>/content")
 def get_source_content(document_id):
+    document, status = authorized_source(document_id, "source_content_access")
+    if status == 403:
+        return jsonify({"error": "Sign in with an authorized department account."}), 403
+    if status == 404:
+        return jsonify({"error": "Source not found or not authorised."}), 404
+    return Response(
+        document.get("text", ""),
+        content_type="text/plain; charset=utf-8",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
+
+
+def authorized_source(document_id, event_type):
     clearance = effective_clearance()
     if clearance is None:
-        return jsonify({"error": "Sign in with an authorized department account."}), 403
+        return None, 403
     document = next((item for item in load_documents() if item["id"] == document_id), None)
     if (
         not document
         or not isinstance(document.get("clearance_rank"), int)
         or document["clearance_rank"] > clearance
     ):
-        audit_event("source_content_access", document_id, "denied")
-        return jsonify({"error": "Source not found or not authorised."}), 404
-    audit_event("source_content_access", document_id)
+        audit_event(event_type, document_id, "denied")
+        return None, 404
+    audit_event(event_type, document_id)
+    return document, None
+
+
+def document_content_blocks(text):
+    blocks = []
+    paragraph = []
+
+    def flush_paragraph():
+        if paragraph:
+            blocks.append({"type": "paragraph", "text": " ".join(paragraph)})
+            paragraph.clear()
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            flush_paragraph()
+            continue
+        heading = re.match(r"^(\d+(?:\.\d+)*)(?:[.)])?\s+(.+)$", line)
+        if heading:
+            flush_paragraph()
+            blocks.append({
+                "type": "heading",
+                "number": heading.group(1),
+                "text": heading.group(2).strip(),
+            })
+        else:
+            paragraph.append(line)
+    flush_paragraph()
+    return blocks
+
+
+def document_key_points(text, limit=4):
+    key_points = []
+    for block in document_content_blocks(text):
+        if block["type"] != "paragraph":
+            continue
+        sentences = re.split(r"(?<=[.!?])\s+", block["text"])
+        first_sentence = next((sentence.strip() for sentence in sentences if sentence.strip()), "")
+        if first_sentence:
+            key_points.append(first_sentence)
+        if len(key_points) >= limit:
+            break
+    return key_points
+
+
+def matches_source_filter(document, source_filter):
+    repository = str(document.get("repository", "")).casefold()
+    document_type = str(document.get("document_type", "")).casefold()
+    title = str(document.get("title", "")).casefold()
+    searchable = f"{title} {document_type} {repository}"
+    if source_filter == "policies":
+        return "policy" in repository or document_type == "policy"
+    if source_filter == "gazettes":
+        return "gazette" in repository
+    if source_filter == "legislation":
+        return bool(re.search(r"\b(act|bill|legislation|regulation|statute)\b", searchable))
+    if source_filter == "grants_benefits":
+        return bool(re.search(r"\b(grant|grants|benefit|benefits|nsfas|sassa)\b", searchable))
+    if source_filter == "department_websites":
+        return bool(document.get("source_url") or document.get("page_url")) or (
+            "department" in repository or "intranet" in repository
+        )
+    return True
+
+
+@app.get("/documents/<document_id>")
+def document_viewer(document_id):
+    document, status = authorized_source(document_id, "source_view")
+    if status:
+        abort(status)
+    return render_template(
+        "document_viewer.html",
+        document=document,
+        content_blocks=document_content_blocks(document.get("text", "")),
+        key_points=document_key_points(document.get("text", "")),
+    )
+
+
+@app.get("/documents/<document_id>/download")
+def download_document(document_id):
+    document, status = authorized_source(document_id, "source_download")
+    if status:
+        abort(status)
+    title = secure_filename(document.get("title", "policy-document")) or "policy-document"
+    content = (
+        f'{document.get("title", "Policy document")}\n'
+        f'Type: {document.get("document_type", "Document")}\n'
+        f'Version: {document.get("version", "Unknown")}\n'
+        f'Owner: {document.get("owner", "Unknown")}\n'
+        f'Classification: {document.get("classification", "Unknown")}\n'
+        f'Publication date: {document.get("date", "Unknown")}\n\n'
+        f'{document.get("text", "")}'
+    )
     return Response(
-        document.get("text", ""),
+        content,
         content_type="text/plain; charset=utf-8",
-        headers={"X-Content-Type-Options": "nosniff"},
+        headers={
+            "Content-Disposition": f'attachment; filename="{title}.txt"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
@@ -684,6 +796,27 @@ def chat():
         return jsonify({"error": "Sign in with an authorized department account."}), 403
 
     documents = load_documents()
+    source_filters = payload.get("source_filters", ["all"])
+    if (
+        not isinstance(source_filters, list)
+        or not source_filters
+        or any(not isinstance(item, str) or item not in SOURCE_FILTERS for item in source_filters)
+    ):
+        return jsonify({"error": "Choose one or more valid source categories."}), 400
+    if "all" not in source_filters:
+        documents = [
+            document
+            for document in documents
+            if any(matches_source_filter(document, item) for item in source_filters)
+        ]
+    document_id = payload.get("document_id")
+    if document_id is not None:
+        if not isinstance(document_id, str) or not document_id or len(document_id) > 200:
+            return jsonify({"error": "Choose a valid document context."}), 400
+        document, status = authorized_source(document_id, "document_chat_context")
+        if status:
+            return jsonify({"error": "Document not found or not authorised."}), status
+        documents = [document]
     history = payload.get("history", [])
     if not isinstance(history, list):
         return jsonify({"error": "Conversation history must be a list."}), 400
@@ -694,9 +827,16 @@ def chat():
         and item.get("role") == "user"
         and isinstance(item.get("content"), str)
     ]
-    answer, passages, provider = answer_question(question, history, documents, clearance)
+    answer, passages, provider = answer_question(
+        question,
+        history,
+        documents,
+        clearance,
+        document_context=document_id is not None,
+    )
     audit_event(
         "chat",
+        document_id,
         outcome="answered" if passages else "no_evidence",
     )
     current_versions = {}
@@ -715,6 +855,7 @@ def chat():
             "version": item["version"],
             "status": item["status"],
             "classification": item["classification"],
+            "owner": item["owner"],
             "repository": item["repository"],
             "date": item["date"],
             "source_url": item.get("source_url"),
@@ -734,9 +875,27 @@ def chat():
                 f'{item["title"]} was found on an official government website, '
                 "but its current publication status could not be verified."
             )
+    related_documents = list({
+        item["document_id"]: {
+            "id": item["document_id"],
+            "title": item["title"],
+            "document_type": item.get("document_type", "Document"),
+            "version": item["version"],
+            "repository": item["repository"],
+            "owner": item["owner"],
+        }
+        for item in passages
+    }.values())
+    confidence_score = (
+        round(min(100, max(0, max(item["score"] for item in passages) * 100)))
+        if passages else None
+    )
     return jsonify({
         "answer": answer,
         "citations": citations,
+        "related_documents": related_documents,
+        "relevant_department": citations[0]["owner"] if citations else None,
+        "confidence_score": confidence_score,
         "warnings": list(dict.fromkeys(warnings)),
         "disclaimer": "For information only. Verify the source and consult an authorised official before acting.",
         "provider": provider,

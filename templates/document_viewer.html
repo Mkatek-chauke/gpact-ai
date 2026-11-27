@@ -1,0 +1,83 @@
+{% from "components/document_viewer.html" import ActionToolbar, DocumentHeader, AISummary, DocumentContent, MetadataCard %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>{{ document.title }} — GPACT AI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='document.css') }}">
+</head>
+<body>
+  <main class="document-page">
+    {{ ActionToolbar(document) }}
+    {{ DocumentHeader(document) }}
+
+    <div class="document-layout">
+      <div class="document-primary">
+        {{ AISummary(key_points) }}
+        {{ DocumentContent(content_blocks) }}
+        <section class="document-question" aria-labelledby="documentQuestionTitle">
+          <div>
+            <h2 id="documentQuestionTitle">Need help understanding this policy?</h2>
+            <p>Ask a question grounded only in this document.</p>
+          </div>
+          <button class="ask-document-button" id="askAboutDocument" type="button">Ask About This Document <span>→</span></button>
+        </section>
+      </div>
+      {{ MetadataCard(document) }}
+    </div>
+  </main>
+  <div class="document-toast" id="documentToast" role="status" aria-live="polite"></div>
+  <script>
+    const documentId = {{ document.id|tojson }};
+
+    function showDocumentToast(message) {
+      const toast = document.querySelector("#documentToast");
+      toast.textContent = message;
+      toast.classList.add("visible");
+      window.setTimeout(() => toast.classList.remove("visible"), 2600);
+    }
+
+    document.querySelector("#backButton").addEventListener("click", () => {
+      if (document.referrer && new URL(document.referrer).origin === window.location.origin) {
+        window.history.back();
+      } else {
+        window.location.assign("/");
+      }
+    });
+
+    const saveButton = document.querySelector("#saveButton");
+    const savedDocumentKey = `gpact-saved-document-${documentId}`;
+    function updateSaveButton() {
+      const isSaved = localStorage.getItem(savedDocumentKey) === "true";
+      saveButton.textContent = isSaved ? "★ Saved" : "☆ Save";
+      saveButton.setAttribute("aria-pressed", String(isSaved));
+    }
+    updateSaveButton();
+    saveButton.addEventListener("click", () => {
+      const isSaved = localStorage.getItem(savedDocumentKey) !== "true";
+      localStorage.setItem(savedDocumentKey, String(isSaved));
+      updateSaveButton();
+      showDocumentToast(isSaved ? "Document saved on this device." : "Document removed from saved items.");
+    });
+
+    document.querySelector("#copyLinkButton").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(window.location.href);
+        showDocumentToast("Document link copied.");
+      } catch {
+        showDocumentToast("Copy is unavailable in this browser. Copy the page address instead.");
+      }
+    });
+
+    document.querySelector("#askAboutDocument").addEventListener("click", () => {
+      sessionStorage.setItem("gpact-document-context", JSON.stringify({
+        id: documentId,
+        title: {{ document.title|tojson }}
+      }));
+      window.location.assign("/");
+    });
+  </script>
+</body>
+</html>

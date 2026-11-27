@@ -70,10 +70,103 @@ class AssistantApiTests(unittest.TestCase):
         result = response.get_json()
         self.assertTrue(result["citations"])
         self.assertIn("[C1]", result["answer"])
+        self.assertIsInstance(result["confidence_score"], int)
+        self.assertTrue(result["related_documents"])
+        self.assertTrue(result["relevant_department"])
         citation = result["citations"][0]
         source = self.client.get(f'/api/source/{citation["document_id"]}')
         self.assertEqual(source.status_code, 200)
         self.assertEqual(source.get_json()["version"], citation["version"])
+
+    def test_document_page_renders_readable_sections_and_metadata(self):
+        response = self.client.get("/documents/records-policy-v2")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("<title>Public Records Management Policy — GPACT AI</title>", page)
+        self.assertIn("AI Summary", page)
+        self.assertIn("Sources &amp; Metadata", page)
+        self.assertIn(
+            "<li>Each department must designate a records officer responsible for managing official records throughout their lifecycle.</li>",
+            page,
+        )
+        self.assertIn("<span>4.1</span> Records ownership", page)
+        self.assertIn("<span>4.2</span> Retention and disposal", page)
+        self.assertIn("records-policy-v2", page)
+        self.assertNotIn('"classification":', page)
+
+    def test_browser_accept_for_source_api_opens_the_document_viewer(self):
+        response = self.client.get(
+            "/api/source/records-policy-v2",
+            headers={"Accept": "text/html"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/documents/records-policy-v2")
+
+    def test_document_page_and_download_enforce_clearance(self):
+        blocked_page = self.client.get("/documents/ai-governance-framework")
+        blocked_download = self.client.get("/documents/ai-governance-framework/download")
+        self.assertEqual(blocked_page.status_code, 404)
+        self.assertEqual(blocked_download.status_code, 404)
+
+        self.set_demo_role("Officer")
+        allowed_page = self.client.get("/documents/ai-governance-framework")
+        self.assertEqual(allowed_page.status_code, 200)
+        download = self.client.get("/documents/ai-governance-framework/download")
+        self.assertEqual(download.status_code, 200)
+        self.assertIn("attachment;", download.headers["Content-Disposition"])
+
+    def test_document_chat_is_scoped_to_the_authorized_document(self):
+        response = self.client.post("/api/chat", json={
+            "question": "Who is responsible for managing official records?",
+            "document_id": "records-policy-v2",
+        })
+        self.assertEqual(response.status_code, 200)
+        citations = response.get_json()["citations"]
+        self.assertTrue(citations)
+        self.assertEqual({citation["document_id"] for citation in citations}, {"records-policy-v2"})
+
+        summary = self.client.post("/api/chat", json={
+            "question": "summaries this document",
+            "document_id": "records-policy-v2",
+        })
+        self.assertEqual(summary.status_code, 200)
+        summary_result = summary.get_json()
+        self.assertTrue(summary_result["citations"])
+        self.assertIn("records officer", summary_result["answer"])
+        self.assertNotIn("couldn't find supporting information", summary_result["answer"])
+        self.assertEqual(
+            {citation["section"] for citation in summary_result["citations"]},
+            {"4.1 Records ownership", "4.2 Retention and disposal", "4.3 Digital records"},
+        )
+
+        blocked = self.client.post("/api/chat", json={
+            "question": "What human oversight is required?",
+            "document_id": "ai-governance-framework",
+        })
+        self.assertEqual(blocked.status_code, 404)
+
+    def test_chat_source_filters_restrict_retrieval_and_reject_unknown_filters(self):
+        response = self.client.post("/api/chat", json={
+            "question": "What belongs in an annual procurement plan?",
+            "source_filters": ["gazettes"],
+        })
+        self.assertEqual(response.status_code, 200)
+        result = response.get_json()
+        self.assertTrue(result["citations"])
+        self.assertTrue(all(citation["repository"] == "Government Gazette" for citation in result["citations"]))
+
+        no_match = self.client.post("/api/chat", json={
+            "question": "What belongs in an annual procurement plan?",
+            "source_filters": ["policies"],
+        })
+        self.assertEqual(no_match.status_code, 200)
+        self.assertEqual(no_match.get_json()["citations"], [])
+
+        invalid = self.client.post("/api/chat", json={
+            "question": "Find a policy.",
+            "source_filters": ["unknown-source"],
+        })
+        self.assertEqual(invalid.status_code, 400)
 
     def test_classification_filters_documents_and_retrieval(self):
         documents = application.load_documents()
