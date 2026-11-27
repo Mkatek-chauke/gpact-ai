@@ -19,12 +19,12 @@
       <button class="nav-item active" id="newChat"><span class="nav-icon">✳</span> New conversation</button>
       <a class="nav-item" href="#library"><span class="nav-icon">▤</span> Knowledge library</a>
       <div class="side-divider"></div>
-      <div class="repo-heading"><span class="side-label">CONNECTED SOURCES</span><span class="live-dot"></span></div>
+      <div class="repo-heading"><span class="side-label">INDEXED REPOSITORIES</span><span class="live-dot"></span></div>
       <div id="repositoryList" class="repo-list"></div>
       <button class="nav-item ingest-link" id="openIngest"><span class="nav-icon">＋</span> Add a document</button>
       <div class="sidebar-bottom">
         <div class="safety-card"><span class="safety-icon">◇</span><div><strong>Information only</strong><p>Answers support your work. They do not replace authorised decisions.</p></div></div>
-        <div class="user-summary"><span class="avatar">PS</span><div><strong>Public service</strong><small id="accessSummary">Public access</small></div><button id="settingsToggle" title="Access settings" aria-label="Access settings">⚙</button></div>
+        <div class="user-summary"><span class="avatar">PS</span><div><strong id="userName">Loading account</strong><small id="accessSummary">Checking access…</small></div>{% if demo_auth_enabled %}<button id="settingsToggle" title="Demo access settings" aria-label="Demo access settings">⚙</button>{% else %}<button id="logoutButton" title="Sign out" aria-label="Sign out">↪</button>{% endif %}</div>
       </div>
     </aside>
 
@@ -75,8 +75,8 @@
           <label>Owner<input name="owner" placeholder="Department or policy owner" maxlength="120" required></label>
           <label>Version<input name="version" value="1.0" maxlength="40" required></label>
           <label>Document date<input type="date" name="date" required></label>
-          <label>Repository<select name="repository"><option>Policy Library</option><option>Government Gazette</option><option>Department Intranet (simulated)</option></select></label>
-          <label>Classification<select name="classification"><option>Public</option><option>Internal</option><option>Confidential</option><option>Secret</option></select></label>
+          <label>Repository<select name="repository"><option>Policy Library</option><option>Government Gazette</option><option>Department Intranet (simulated)</option><option>Government DMS (simulated)</option></select></label>
+          <label>Classification<select name="classification"><option>Public</option><option>Internal</option><option>Restricted</option></select></label>
           <label>Document status<select name="status"><option>Current</option><option>Draft</option><option>Superseded</option></select></label>
           <label>Document type<input name="document_type" value="Policy" maxlength="50" required></label>
         </div>
@@ -88,8 +88,8 @@
           <label>Owner<input name="owner" placeholder="Department or policy owner" required></label>
           <label>Version<input name="version" value="1.0" required></label>
           <label>Document date<input type="date" name="date" required></label>
-          <label>Repository<select name="repository"><option>Government Gazette</option><option>Policy Library</option><option>Department Intranet (simulated)</option></select></label>
-          <label>Classification<select name="classification"><option>Public</option><option>Internal</option><option>Confidential</option><option>Secret</option></select></label>
+          <label>Repository<select name="repository"><option>Government Gazette</option><option>Policy Library</option><option>Department Intranet (simulated)</option><option>Government DMS (simulated)</option></select></label>
+          <label>Classification<select name="classification"><option>Public</option><option>Internal</option><option>Restricted</option></select></label>
           <label>Document status<select name="status"><option>Current</option><option>Draft</option><option>Superseded</option></select></label>
           <label>Document type<input name="document_type" value="Web document" required></label>
         </div>
@@ -111,11 +111,11 @@
         </div>
         <div class="modal-error" id="departmentError"></div><button class="primary-button modal-submit" type="submit">Import department PDFs <span>→</span></button>
       </form>
-      <div class="demo-note">Demo access settings are not authentication. Never ingest classified, confidential, or personal information in this demo.</div>
+      <div class="demo-note">Repository connectors are not configured in this build. Never ingest classified or personal information unless your deployment has approved storage and access controls.</div>
     </div>
   </div>
   <div class="modal-backdrop hidden" id="settingsModal">
-    <div class="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle"><div class="modal-head"><div><span class="modal-kicker">DEMO ONLY</span><h2 id="settingsTitle">Access settings</h2></div><button class="icon-button close-modal" aria-label="Close">×</button></div><p class="modal-copy">Choose a simulated identity to preview role-based document visibility. This selector is not suitable for production authorization.</p><div class="form-grid"><label>Role<select id="roleSelect"><option>Official</option><option>Policy Analyst</option><option>Records Officer</option><option>Administrator</option></select></label><label>Clearance<select id="clearanceSelect"><option>Public</option><option>Internal</option><option>Confidential</option><option>Secret</option></select></label></div><button id="saveSettings" class="primary-button modal-submit">Apply access view <span>→</span></button></div>
+    <div class="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle"><div class="modal-head"><div><span class="modal-kicker">LOCAL DEMO ONLY</span><h2 id="settingsTitle">Access settings</h2></div><button class="icon-button close-modal" aria-label="Close">×</button></div><p class="modal-copy">Switch between simulated roles. The server applies each role's fixed classification limit. This selector is disabled on Vercel.</p><div class="form-grid"><label>Role<select id="roleSelect"><option>Citizen</option><option>Officer</option><option>Manager</option><option>Administrator</option></select></label></div><button id="saveSettings" class="primary-button modal-submit">Apply access view <span>→</span></button></div>
   </div>
   <div class="toast hidden" id="toast" role="status"></div>
   <script src="{{ url_for('static', filename='app.js') }}" defer></script>

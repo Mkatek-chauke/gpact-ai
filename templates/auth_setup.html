@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPACT AI — Sign-in unavailable</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='accessibility.css') }}">
+</head>
+<body>
+  <main class="auth-notice">
+    <h1>Department sign-in is not configured</h1>
+    <p>GPACT AI requires Microsoft Entra ID and a server-side session secret before it can expose policy documents.</p>
+    <p>Configure the Entra tenant, application credentials, redirect URI, and <code>FLASK_SECRET_KEY</code> in the deployment environment. Do not enter credentials in this page.</p>
+    <a href="/healthz">View configuration status</a>
+  </main>
+</body>
+</html>

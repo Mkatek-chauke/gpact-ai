@@ -251,3 +251,18 @@ textarea {
     padding: 18px;
   }
 }
+
+.auth-notice {
+  max-width: 680px;
+  margin: 12vh auto;
+  padding: 32px;
+  border: 1px solid #dfe6ed;
+  border-radius: 12px;
+  background: #fff;
+  color: #23384f;
+  line-height: 1.7;
+}
+
+.auth-notice h1 {
+  font-size: 30px;
+}

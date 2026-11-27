@@ -20,6 +20,21 @@ PERSONAL_DATA_RE = re.compile(
     r"\b\d{13}\b|"
     r"(?<!\w)(?:\+?27|0)\s?\d{2}[\s-]?\d{3}[\s-]?\d{4}(?!\w)"
 )
+PERSONAL_DATA_REQUEST_RE = re.compile(
+    r"\b(?:show|list|give|reveal|export|find|provide)\b.{0,80}\b"
+    r"(?:employee\s+ids?|id\s+numbers?|personal\s+addresses|home\s+addresses|"
+    r"phone\s+numbers|personal\s+details|staff\s+records)\b",
+    re.I,
+)
+DECISION_REQUEST_RE = re.compile(
+    r"\b(?:should\s+i|should\s+we|do\s+i|do\s+we)\s+"
+    r"(?:approve|reject|award|select|appoint|dismiss)\b",
+    re.I,
+)
+HISTORICAL_VERSION_RE = re.compile(
+    r"\b(?:superseded|previous|older|historical|version\s*\d|v\d)\b",
+    re.I,
+)
 
 
 def tokenize(text):
@@ -59,9 +74,19 @@ def rank_passages(question, documents, clearance):
     terms = set(tokenize(question))
     if not terms:
         return []
+    current_families = {
+        document.get("version_family", document.get("title", "").strip().casefold())
+        for document in documents
+        if document.get("status") == "Current"
+    }
+    include_history = bool(HISTORICAL_VERSION_RE.search(question))
     passages = []
     for document in documents:
-        if document.get("clearance_rank", 0) > clearance:
+        rank = document.get("clearance_rank")
+        if not isinstance(rank, int) or rank > clearance:
+            continue
+        family = document.get("version_family", document.get("title", "").strip().casefold())
+        if document.get("status") == "Superseded" and family in current_families and not include_history:
             continue
         for chunk in make_chunks(document):
             words = tokenize(f'{chunk["text"]} {chunk["section"]} {document["title"]}')
@@ -76,6 +101,7 @@ def rank_passages(question, documents, clearance):
                     **chunk,
                     "document_id": document["id"],
                     "title": document["title"],
+                    "version_family": family,
                     "version": document["version"],
                     "status": document["status"],
                     "classification": document["classification"],
@@ -127,12 +153,32 @@ def _all_sentences_cited(answer, passages):
 
 
 def answer_question(question, history, documents, clearance):
+    if PERSONAL_DATA_RE.search(question) or PERSONAL_DATA_REQUEST_RE.search(question):
+        return (
+            "I can't help retrieve or disclose personal information. Use an authorised, "
+            "privacy-approved process for any permitted records request.",
+            [],
+            "Local privacy safeguard",
+        )
     follow_up_context = " ".join(
         item.get("content", "")[:300]
         for item in history[-4:]
         if isinstance(item, dict) and item.get("role") == "user" and isinstance(item.get("content"), str)
     )
     passages = rank_passages(f"{follow_up_context} {question}", documents, clearance)
+    if DECISION_REQUEST_RE.search(question):
+        prefix = (
+            "I can't approve, reject, or make a procurement decision. "
+        )
+        if passages:
+            answer = (
+                prefix
+                + "I can provide the policy information for an authorised official to assess: "
+                + _fallback_answer(passages)
+            )
+        else:
+            answer = prefix + _fallback_answer(passages)
+        return answer, passages, "Local decision safeguard"
     answer = None
     provider = "Local extractive retrieval"
     safe_for_external_provider = (

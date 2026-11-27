@@ -4,11 +4,12 @@ const conversation = $("#conversation");
 const library = $("#library");
 const input = $("#questionInput");
 const sendButton = $("#sendButton");
-const state = { history: [], role: "Official", clearance: "Public", busy: false };
+const state = { history: [], user: null, csrfToken: "", busy: false };
 
 function headers(json = false) {
-  const result = { "X-User-Role": state.role, "X-User-Clearance": state.clearance };
+  const result = {};
   if (json) result["Content-Type"] = "application/json";
+  if (state.csrfToken) result["X-CSRF-Token"] = state.csrfToken;
   return result;
 }
 
@@ -63,7 +64,7 @@ async function loadDocuments() {
   renderRepositories(data.documents);
   $("#documentList").innerHTML = data.documents.map((doc) => `
     <a class="document-card" href="/api/source/${encodeURIComponent(doc.id)}" target="_blank" rel="noopener">
-      <span><strong>${escapeHtml(doc.title)}</strong><small>${escapeHtml(doc.document_type)} · v${escapeHtml(doc.version)} · ${escapeHtml(doc.owner)} · ${escapeHtml(doc.repository)}</small></span>
+      <span><strong>${escapeHtml(doc.title)}</strong><small>${escapeHtml(doc.document_type)} · v${escapeHtml(doc.version)} · ${escapeHtml(doc.owner)} · ${escapeHtml(doc.repository)} · ${escapeHtml(doc.classification)}</small></span>
       <span class="status-pill ${statusClass(doc.status)}">${escapeHtml(doc.status)}</span>
     </a>
   `).join("") || '<p class="library-sub">No documents are available at this access level.</p>';
@@ -84,7 +85,7 @@ function renderAnswer(result) {
   const citations = result.citations.length ? `
     <div class="citation-panel"><h3>SOURCE DOCUMENTS · ${result.citations.length}</h3>
       ${result.citations.map((citation) => `
-        <a class="citation" id="citation-${escapeHtml(citation.ref)}" href="${escapeHtml(citation.source_url && citation.source_url.startsWith("https://") ? citation.source_url : `/api/source/${encodeURIComponent(citation.document_id)}`)}" target="_blank" rel="noopener">
+        <a class="citation" id="citation-${escapeHtml(citation.ref)}" href="${escapeHtml(citation.source_url && citation.source_url.startsWith("https://") ? citation.source_url : `/api/source/${encodeURIComponent(citation.document_id)}/content`)}" target="_blank" rel="noopener">
           <span class="cite-ref">${escapeHtml(citation.ref)}</span><span class="cite-details"><strong>${escapeHtml(citation.title)}</strong>
           <small>${escapeHtml(citation.section)} · v${escapeHtml(citation.version)} · ${escapeHtml(citation.status)} · ${escapeHtml(citation.repository)}${citation.page_url ? ` · Source page: ${escapeHtml(citation.page_url)}` : ""}</small></span>
         </a>`).join("")}
@@ -170,7 +171,15 @@ document.querySelectorAll('a[href="#library"]').forEach((link) => link.addEventL
 }));
 $("#openIngest").addEventListener("click", () => openModal("#ingestModal"));
 $("#libraryAdd").addEventListener("click", () => openModal("#ingestModal"));
-$("#settingsToggle").addEventListener("click", () => openModal("#settingsModal"));
+$("#settingsToggle")?.addEventListener("click", () => openModal("#settingsModal"));
+$("#logoutButton")?.addEventListener("click", async () => {
+  try {
+    await fetch("/auth/logout", { method: "POST", headers: headers() });
+    window.location.assign("/");
+  } catch (error) {
+    showToast(error.message || "Sign out failed.");
+  }
+});
 $("#helpButton").addEventListener("click", () => showToast("Answers are informational. Follow source links and confirm decisions with an authorised official."));
 document.querySelectorAll(".close-modal").forEach((button) => button.addEventListener("click", closeModals));
 document.querySelectorAll(".modal-backdrop").forEach((backdrop) => backdrop.addEventListener("click", (event) => {
@@ -195,7 +204,6 @@ async function loadGovzaCategories() {
     $("#govzaError").textContent = error.message;
   }
 }
-loadGovzaCategories();
 let departmentListLoaded = false;
 async function loadNationalDepartments() {
   if (departmentListLoaded) return;
@@ -244,15 +252,44 @@ $("#urlForm").addEventListener("submit", (event) => submitIngestion(event, "/api
 $("#govzaForm").addEventListener("submit", (event) => submitIngestion(event, "/api/ingest-govza", "#govzaError"));
 $("#departmentForm").addEventListener("submit", (event) => submitIngestion(event, "/api/ingest-department", "#departmentError"));
 $("#saveSettings").addEventListener("click", async () => {
-  state.role = $("#roleSelect").value;
-  state.clearance = $("#clearanceSelect").value;
-  $("#accessSummary").textContent = `${state.role} · ${state.clearance}`;
-  closeModals();
-  state.history = [];
-  conversation.replaceChildren();
-  setView("welcome");
-  try { await loadDocuments(); } catch (error) { showToast(error.message); }
-  showToast(`Access view set to ${state.clearance}.`);
+  try {
+    const response = await fetch("/api/demo-role", {
+      method: "POST",
+      headers: headers(true),
+      body: JSON.stringify({ role: $("#roleSelect").value }),
+    });
+    const result = await readJson(response);
+    state.user = result.user;
+    updateUserSummary();
+    closeModals();
+    state.history = [];
+    conversation.replaceChildren();
+    setView("welcome");
+    await loadDocuments();
+    showToast(`Access view set to ${result.user.role}.`);
+  } catch (error) {
+    showToast(error.message);
+  }
 });
 
-loadDocuments().catch((error) => showToast(error.message));
+function updateUserSummary() {
+  if (!state.user) return;
+  $("#userName").textContent = state.user.name;
+  const clearance = ["Public", "Internal", "Restricted"][state.user.clearance];
+  $("#accessSummary").textContent = `${state.user.role} · ${clearance}`;
+  if ($("#roleSelect")) $("#roleSelect").value = state.user.role;
+  const canManage = ["Manager", "Administrator"].includes(state.user.role);
+  $("#openIngest").classList.toggle("hidden", !canManage);
+  $("#libraryAdd").classList.toggle("hidden", !canManage);
+}
+
+async function bootstrap() {
+  const response = await fetch("/api/session");
+  const result = await readJson(response);
+  state.user = result.user;
+  state.csrfToken = result.csrf_token;
+  updateUserSummary();
+  await Promise.all([loadDocuments(), loadGovzaCategories()]);
+}
+
+bootstrap().catch((error) => showToast(error.message));
