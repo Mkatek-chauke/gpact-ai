@@ -43,15 +43,8 @@ function setView(view) {
   welcome.classList.toggle("hidden", view !== "welcome");
   conversation.classList.toggle("hidden", view !== "conversation");
   library.classList.toggle("hidden", view !== "library");
+  $(".composer-wrap").classList.toggle("hidden", view !== "conversation");
   $("#headerState").textContent = view === "library" ? "Knowledge library" : view === "conversation" ? "Conversation" : "New conversation";
-}
-
-function renderRepositories(documents) {
-  const counts = {};
-  documents.forEach((doc) => { counts[doc.repository] = (counts[doc.repository] || 0) + 1; });
-  $("#repositoryList").innerHTML = Object.entries(counts).map(([name, count]) => `
-    <div class="repo-item"><span class="repo-icon">▤</span><span>${escapeHtml(name)}</span><span class="repo-count">${count}</span></div>
-  `).join("") || '<div class="repo-item">No visible documents</div>';
 }
 
 function statusClass(status) {
@@ -61,7 +54,6 @@ function statusClass(status) {
 async function loadDocuments() {
   const response = await fetch("/api/documents", { headers: headers() });
   const data = await readJson(response);
-  renderRepositories(data.documents);
   $("#documentList").innerHTML = data.documents.map((doc) => `
     <a class="document-card" href="/api/source/${encodeURIComponent(doc.id)}" target="_blank" rel="noopener">
       <span><strong>${escapeHtml(doc.title)}</strong><small>${escapeHtml(doc.document_type)} · v${escapeHtml(doc.version)} · ${escapeHtml(doc.owner)} · ${escapeHtml(doc.repository)} · ${escapeHtml(doc.classification)}</small></span>
@@ -143,14 +135,28 @@ function closeModals() {
   document.querySelectorAll(".modal-backdrop").forEach((modal) => modal.classList.add("hidden"));
 }
 
-document.querySelectorAll(".suggestion").forEach((button) => {
+document.querySelectorAll("[data-question]").forEach((button) => {
   button.addEventListener("click", () => ask(button.dataset.question));
 });
 $("#newChat").addEventListener("click", () => {
   state.history = [];
   conversation.replaceChildren();
   setView("welcome");
+});
+$("#askQuestion").addEventListener("click", () => {
+  setView("conversation");
   input.focus();
+});
+$("#searchPolicy").addEventListener("click", () => {
+  setView("library");
+  loadDocuments().catch((error) => showToast(error.message));
+});
+$("#uploadDocuments").addEventListener("click", () => {
+  if (!state.user || !["Manager", "Administrator"].includes(state.user.role)) {
+    showToast("A Manager or Administrator role is required to upload documents.");
+    return;
+  }
+  openModal("#ingestModal");
 });
 $("#sendButton").addEventListener("click", () => ask(input.value));
 input.addEventListener("input", () => {
@@ -169,13 +175,20 @@ document.querySelectorAll('a[href="#library"]').forEach((link) => link.addEventL
   setView("library");
   loadDocuments().catch((error) => showToast(error.message));
 }));
-$("#openIngest").addEventListener("click", () => openModal("#ingestModal"));
 $("#libraryAdd").addEventListener("click", () => openModal("#ingestModal"));
 $("#settingsToggle")?.addEventListener("click", () => openModal("#settingsModal"));
 $("#logoutButton")?.addEventListener("click", async () => {
   try {
     await fetch("/auth/logout", { method: "POST", headers: headers() });
     window.location.assign("/");
+  } catch (error) {
+    showToast(error.message || "Sign out failed.");
+  }
+});
+$("#demoLogout")?.addEventListener("click", async () => {
+  try {
+    await fetch("/auth/logout", { method: "POST", headers: headers() });
+    window.location.assign("/auth/account");
   } catch (error) {
     showToast(error.message || "Sign out failed.");
   }
@@ -275,12 +288,12 @@ $("#saveSettings").addEventListener("click", async () => {
 function updateUserSummary() {
   if (!state.user) return;
   $("#userName").textContent = state.user.name;
+  $("#welcomeName").textContent = state.user.name.split(/\s+/)[0];
+  $(".avatar").textContent = state.user.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
   const clearance = ["Public", "Internal", "Restricted"][state.user.clearance];
   $("#accessSummary").textContent = `${state.user.role} · ${clearance}`;
   if ($("#roleSelect")) $("#roleSelect").value = state.user.role;
-  const canManage = ["Manager", "Administrator"].includes(state.user.role);
-  $("#openIngest").classList.toggle("hidden", !canManage);
-  $("#libraryAdd").classList.toggle("hidden", !canManage);
+  $("#libraryAdd").classList.toggle("hidden", !["Manager", "Administrator"].includes(state.user.role));
 }
 
 async function bootstrap() {
@@ -289,6 +302,7 @@ async function bootstrap() {
   state.user = result.user;
   state.csrfToken = result.csrf_token;
   updateUserSummary();
+  setView("welcome");
   await Promise.all([loadDocuments(), loadGovzaCategories()]);
 }
 

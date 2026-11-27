@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPACT AI - Government Policy Assistant</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='accessibility.css') }}">
+  <style>
+    body { background: #f7f9fc; }
+    .landing { min-height: 100vh; }
+    .landing-nav {
+      height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 28px;
+    }
+    .landing-actions { display: flex; gap: 10px; }
+    .landing-actions a {
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 7px;
+      padding: 0 16px;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 700;
+      color: #17436a;
+      border: 1px solid #dfe5ec;
+      background: #fff;
+    }
+    .landing-actions .primary { color: #fff; background: #17436a; border-color: #17436a; }
+    .hero {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 70px 28px 48px;
+      display: grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap: 52px;
+      align-items: center;
+    }
+    .hero h1 {
+      max-width: 720px;
+      margin: 16px 0 18px;
+      color: #162f4b;
+      font: 800 clamp(42px, 6vw, 72px)/1.04 Manrope, sans-serif;
+      letter-spacing: -3px;
+    }
+    .hero h1 em { color: #4182b9; font-style: normal; }
+    .hero-copy {
+      max-width: 620px;
+      color: #718195;
+      font-size: 17px;
+      line-height: 1.75;
+    }
+    .hero-links { display: flex; gap: 12px; margin-top: 28px; }
+    .hero-links a { min-width: 150px; }
+    .architecture {
+      background: #fff;
+      border: 1px solid #e5eaf0;
+      border-radius: 14px;
+      padding: 22px;
+      box-shadow: 0 18px 50px rgba(16,44,73,.08);
+    }
+    .architecture h2 { margin: 0 0 16px; font-size: 14px; color: #31516f; }
+    .flow-item {
+      border: 1px solid #e7ebf1;
+      border-radius: 9px;
+      padding: 13px 14px;
+      margin-top: 8px;
+      background: #fbfcfe;
+    }
+    .flow-item strong { display: block; color: #243d56; font-size: 14px; }
+    .flow-item small { display: block; margin-top: 4px; color: #8794a3; font-size: 12px; }
+    .flow-arrow { text-align: center; color: #82a4c1; height: 20px; line-height: 20px; }
+    .features {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 12px 28px 60px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+    .feature {
+      background: #fff;
+      border: 1px solid #e5eaf0;
+      border-radius: 10px;
+      padding: 18px;
+    }
+    .feature strong { color: #31516f; }
+    .feature p { color: #7e8d9d; line-height: 1.6; font-size: 13px; margin: 8px 0 0; }
+    @media (max-width: 800px) {
+      .hero { grid-template-columns: 1fr; padding-top: 42px; }
+      .features { grid-template-columns: 1fr; }
+      .landing-nav { padding: 0 18px; }
+      .hero { padding-right: 18px; padding-left: 18px; }
+      .features { padding-right: 18px; padding-left: 18px; }
+      .hero h1 { letter-spacing: -2px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="landing">
+    <nav class="landing-nav" aria-label="Main navigation">
+      <a class="brand" href="/" aria-label="GPACT AI home">
+        <span class="brand-mark">G</span>
+        <span><strong>GPACT <span>AI</span></strong><small>POLICY &amp; GOVERNANCE</small></span>
+      </a>
+      <div class="landing-actions">
+        {% if demo_auth_enabled %}
+          <a href="/auth/account">Login</a>
+          <a class="primary" href="/auth/account">Register</a>
+        {% else %}
+          <a class="primary" href="/auth/login">Department sign-in</a>
+        {% endif %}
+      </div>
+    </nav>
+
+    <section class="hero">
+      <div>
+        <div class="eyebrow"><span class="eyebrow-line"></span> GOVERNMENT POLICY ACCESS</div>
+        <h1>Clear evidence.<br><em>Better decisions.</em></h1>
+        <p class="hero-copy">
+          Ask grounded questions about legislation, policy, and governance.
+          GPACT AI searches authorised documents and links every answer to its source.
+        </p>
+        <div class="hero-links">
+          {% if demo_auth_enabled %}
+            <a class="primary-button" href="/auth/account" style="display:inline-flex;text-decoration:none;align-items:center;justify-content:center;">Sign in</a>
+            <a class="primary-button" href="/auth/account" style="display:inline-flex;text-decoration:none;align-items:center;justify-content:center;background:#fff;color:#17436a;border:1px solid #dfe5ec;">Create account</a>
+          {% else %}
+            <a class="primary-button" href="/auth/login" style="display:inline-flex;text-decoration:none;align-items:center;justify-content:center;">Sign in with department account</a>
+          {% endif %}
+        </div>
+      </div>
+
+      <aside class="architecture" aria-label="GPACT AI architecture">
+        <h2>Simple, source-grounded workflow</h2>
+        <div class="flow-item"><strong>Frontend</strong><small>Chat interface</small></div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-item"><strong>Backend API</strong><small>Authentication and document retrieval</small></div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-item"><strong>AI and knowledge</strong><small>Azure/OpenAI · vector search · policy documents</small></div>
+      </aside>
+    </section>
+
+    <section class="features" aria-label="Features">
+      <article class="feature"><strong>Source-cited answers</strong><p>Responses include links to the indexed document and section.</p></article>
+      <article class="feature"><strong>Access-aware</strong><p>Results respect the current user's classification and role.</p></article>
+      <article class="feature"><strong>Document library</strong><p>Add PDFs, Word documents, public web pages, and policy sources.</p></article>
+    </section>
+  </main>
+</body>
+</html>

@@ -16,14 +16,8 @@
         <span><strong>GPACT <span>AI</span></strong><small>POLICY &amp; GOVERNANCE</small></span>
       </a>
       <div class="side-label">WORKSPACE</div>
-      <button class="nav-item active" id="newChat"><span class="nav-icon">✳</span> New conversation</button>
-      <a class="nav-item" href="#library"><span class="nav-icon">▤</span> Knowledge library</a>
-      <div class="side-divider"></div>
-      <div class="repo-heading"><span class="side-label">INDEXED REPOSITORIES</span><span class="live-dot"></span></div>
-      <div id="repositoryList" class="repo-list"></div>
-      <button class="nav-item ingest-link" id="openIngest"><span class="nav-icon">＋</span> Add a document</button>
+      <button class="nav-item active" id="newChat"><span class="nav-icon">✳</span> Home</button>
       <div class="sidebar-bottom">
-        <div class="safety-card"><span class="safety-icon">◇</span><div><strong>Information only</strong><p>Answers support your work. They do not replace authorised decisions.</p></div></div>
         <div class="user-summary"><span class="avatar">PS</span><div><strong id="userName">Loading account</strong><small id="accessSummary">Checking access…</small></div>{% if demo_auth_enabled %}<button id="settingsToggle" title="Demo access settings" aria-label="Demo access settings">⚙</button>{% else %}<button id="logoutButton" title="Sign out" aria-label="Sign out">↪</button>{% endif %}</div>
       </div>
     </aside>
@@ -34,20 +28,37 @@
         <div class="top-actions"><span class="privacy-note"><span class="privacy-dot"></span> Your questions aren't saved</span><button class="icon-button" id="helpButton" aria-label="Safety information">?</button></div>
       </header>
       <div class="main-scroll">
-        <section class="welcome" id="welcome">
-          <div class="eyebrow"><span class="eyebrow-line"></span> GOVERNMENT POLICY ACCESS</div>
-          <h1>Good decisions start<br>with <em>clear evidence.</em></h1>
-          <p>Ask about legislation, policy, or governance. Answers use only documents you are authorised to access, with source links; when the library has no evidence, the assistant says so.</p>
-          <div class="trust-pills"><span><span>✓</span> Source-cited answers</span><span><span>✓</span> Version-aware</span><span><span>✓</span> Access-controlled</span></div>
-          <div class="suggestion-label">TRY ASKING</div>
-          <div class="suggestions">
-            <button class="suggestion" data-question="What should happen before official records are destroyed?"><span class="suggestion-icon blue">▤</span><span><strong>Records management</strong><small>What must happen before records are destroyed?</small></span><span class="suggestion-arrow">↗</span></button>
-            <button class="suggestion" data-question="What oversight is required when using AI in government?"><span class="suggestion-icon violet">◇</span><span><strong>Responsible AI</strong><small>What oversight is required when using AI?</small></span><span class="suggestion-arrow">↗</span></button>
-            <button class="suggestion" data-question="What should be included in an annual procurement plan?"><span class="suggestion-icon amber">▦</span><span><strong>Procurement planning</strong><small>What belongs in an annual procurement plan?</small></span><span class="suggestion-arrow">↗</span></button>
+        <section class="welcome dashboard" id="welcome">
+          <div class="dashboard-heading">
+            <div>
+              <div class="eyebrow"><span class="eyebrow-line"></span> YOUR WORKSPACE</div>
+              <h1>Welcome, <span id="welcomeName">there</span></h1>
+              <p>Government Knowledge &amp; Policy Assistant</p>
+            </div>
+            <button class="primary-button ask-question-button" id="askQuestion">Ask a Question <span>→</span></button>
           </div>
+
+          <section class="dashboard-section" aria-labelledby="quickActionsTitle">
+            <h2 id="quickActionsTitle">Quick Actions</h2>
+            <div class="quick-actions">
+              <button class="quick-action" id="searchPolicy"><span class="quick-action-icon">⌕</span><strong>Search Policy</strong><small>Find indexed government guidance</small></button>
+              <button class="quick-action" data-question="What are the eligibility requirements for government support programmes in the indexed policies? Cite the relevant sources."><span class="quick-action-icon">✓</span><strong>Check Eligibility</strong><small>Ask about policy requirements</small></button>
+              <button class="quick-action" id="uploadDocuments"><span class="quick-action-icon">↑</span><strong>Upload Documents</strong><small>Add approved policy documents</small></button>
+              <button class="quick-action" data-question="Which application procedures and status-check instructions are described in the indexed government policies? Cite the sources."><span class="quick-action-icon">▤</span><strong>View Applications</strong><small>Ask about application procedures</small></button>
+            </div>
+          </section>
+
+          <section class="dashboard-section recent-section" aria-labelledby="recentActivityTitle">
+            <h2 id="recentActivityTitle">Recent Activity</h2>
+            <div class="recent-activity">
+              <button data-question="Summarize the indexed NSFAS funding rules and eligibility requirements. Cite the source documents."><span>•</span> NSFAS Funding Rules <small>Ask about this topic</small></button>
+              <button data-question="What policy guidance is indexed about housing subsidies and eligibility? Cite the source documents."><span>•</span> Housing Subsidy Query <small>Ask about this topic</small></button>
+              <button data-question="What are the indexed rules for the Child Support Grant? Cite the source documents."><span>•</span> Child Support Grant <small>Ask about this topic</small></button>
+            </div>
+          </section>
         </section>
         <section class="conversation hidden" id="conversation" aria-live="polite"></section>
-        <div class="composer-wrap">
+        <div class="composer-wrap hidden">
           <div class="composer">
             <textarea id="questionInput" rows="1" maxlength="2000" placeholder="Ask a policy or governance question..." aria-label="Ask a question"></textarea>
             <div class="composer-bottom"><span class="input-hint"><span>↵</span> Enter to ask · Shift + Enter for a new line</span><button id="sendButton" class="send-button" aria-label="Send question" disabled><span>↑</span></button></div>
@@ -115,7 +126,7 @@
     </div>
   </div>
   <div class="modal-backdrop hidden" id="settingsModal">
-    <div class="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle"><div class="modal-head"><div><span class="modal-kicker">LOCAL DEMO ONLY</span><h2 id="settingsTitle">Access settings</h2></div><button class="icon-button close-modal" aria-label="Close">×</button></div><p class="modal-copy">Switch between simulated roles. The server applies each role's fixed classification limit. This selector is disabled on Vercel.</p><div class="form-grid"><label>Role<select id="roleSelect"><option>Citizen</option><option>Officer</option><option>Manager</option><option>Administrator</option></select></label></div><button id="saveSettings" class="primary-button modal-submit">Apply access view <span>→</span></button></div>
+    <div class="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle"><div class="modal-head"><div><span class="modal-kicker">LOCAL DEMO ONLY</span><h2 id="settingsTitle">Account and access</h2></div><button class="icon-button close-modal" aria-label="Close">×</button></div><p class="modal-copy">Switch between simulated roles. The server applies each role's fixed classification limit. This selector is disabled on Vercel.</p><div class="form-grid"><label>Role<select id="roleSelect"><option>Citizen</option><option>Officer</option><option>Manager</option><option>Administrator</option></select></label></div><button id="saveSettings" class="primary-button modal-submit">Apply access view <span>→</span></button><button id="demoLogout" class="primary-button modal-submit" type="button" style="margin-top:10px;background:#758396;">Sign out</button></div>
   </div>
   <div class="toast hidden" id="toast" role="status"></div>
   <script src="{{ url_for('static', filename='app.js') }}" defer></script>

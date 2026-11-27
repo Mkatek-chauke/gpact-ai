@@ -8,3 +8,4 @@ uploads/*
 !uploads/.gitkeep
 .neon
 node_modules/
+data/accounts.json

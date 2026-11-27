@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPACT AI - Local account</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='accessibility.css') }}">
+</head>
+<body>
+  <main class="auth-notice" style="max-width: 480px;">
+    <h1>GPACT AI account</h1>
+    <p>Local demo sign-in. Accounts are stored only on this server with password hashes.</p>
+    <div class="ingest-tabs" style="margin-top: 18px;">
+      <button class="tab active" type="button" data-auth-tab="login">Login</button>
+      <button class="tab" type="button" data-auth-tab="register">Register</button>
+      <button class="tab" type="button" data-auth-tab="forgot">Forgot password</button>
+    </div>
+
+    <form id="loginForm" class="form-grid" style="grid-template-columns: 1fr;">
+      <label>Email<input type="email" name="email" autocomplete="email" required></label>
+      <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
+      <button class="primary-button modal-submit" type="submit">Login</button>
+    </form>
+
+    <form id="registerForm" class="form-grid hidden" style="grid-template-columns: 1fr;">
+      <label>Full name<input name="name" autocomplete="name" maxlength="160" required></label>
+      <label>Email<input type="email" name="email" autocomplete="email" required></label>
+      <label>Password<input type="password" name="password" autocomplete="new-password" minlength="8" required></label>
+      <label>Role<select name="role"><option>Citizen</option><option>Officer</option><option>Manager</option><option>Administrator</option></select></label>
+      <button class="primary-button modal-submit" type="submit">Register</button>
+    </form>
+
+    <form id="forgotForm" class="form-grid hidden" style="grid-template-columns: 1fr;">
+      <label>Email<input type="email" name="email" autocomplete="email" required></label>
+      <button class="primary-button modal-submit" type="submit">Generate reset token</button>
+    </form>
+
+    <form id="resetForm" class="form-grid hidden" style="grid-template-columns: 1fr;">
+      <label>Reset token<input name="token" autocomplete="off" required></label>
+      <label>New password<input type="password" name="password" autocomplete="new-password" minlength="8" required></label>
+      <button class="primary-button modal-submit" type="submit">Reset password</button>
+    </form>
+
+    <div id="authError" class="modal-error" role="alert"></div>
+    <div id="authMessage" class="demo-note"></div>
+  </main>
+
+  <script>
+    const authCsrfToken = {{ csrf_token|tojson }};
+    const tabs = document.querySelectorAll("[data-auth-tab]");
+    const forms = {
+      login: document.querySelector("#loginForm"),
+      register: document.querySelector("#registerForm"),
+      forgot: document.querySelector("#forgotForm")
+    };
+
+    tabs.forEach((tab) => tab.addEventListener("click", () => {
+      tabs.forEach((item) => item.classList.toggle("active", item === tab));
+      Object.entries(forms).forEach(([name, form]) => form.classList.toggle("hidden", name !== tab.dataset.authTab));
+      document.querySelector("#authError").textContent = "";
+      document.querySelector("#authMessage").textContent = "";
+    }));
+
+    async function submitAuth(endpoint, form) {
+      const error = document.querySelector("#authError");
+      const message = document.querySelector("#authMessage");
+      error.textContent = "";
+      message.textContent = "";
+      const payload = Object.fromEntries(new FormData(form).entries());
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": authCsrfToken
+        },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Request failed.");
+      return result;
+    }
+
+    forms.login.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const result = await submitAuth("/api/auth/login", forms.login);
+        window.location.assign(result.redirect || "/");
+      } catch (err) {
+        document.querySelector("#authError").textContent = err.message;
+      }
+    });
+
+    forms.register.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const result = await submitAuth("/api/auth/register", forms.register);
+        window.location.assign(result.redirect || "/");
+      } catch (err) {
+        document.querySelector("#authError").textContent = err.message;
+      }
+    });
+
+    forms.forgot.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const result = await submitAuth("/api/auth/forgot", forms.forgot);
+        document.querySelector("#authMessage").textContent = result.message;
+        if (result.reset_token) {
+          document.querySelector("#resetForm").classList.remove("hidden");
+          document.querySelector("#resetForm [name=token]").value = result.reset_token;
+        }
+      } catch (err) {
+        document.querySelector("#authError").textContent = err.message;
+      }
+    });
+
+    document.querySelector("#resetForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const result = await submitAuth("/api/auth/reset", document.querySelector("#resetForm"));
+        document.querySelector("#authMessage").textContent = result.message;
+      } catch (err) {
+        document.querySelector("#authError").textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 import psycopg
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
@@ -38,6 +39,7 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 load_dotenv(ROOT / ".env.local")
 DATA_FILE = ROOT / "data" / "documents.json"
+ACCOUNTS_FILE = ROOT / "data" / "accounts.json"
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "gpact-ai-uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 app = Flask(__name__, static_folder=str(ROOT / "public" / "static"), static_url_path="/static")
@@ -96,6 +98,27 @@ RATE_LIMITS = {
     "ingest_department": (5, 60),
 }
 
+LOCAL_RESET_TOKENS = {}
+
+
+def load_local_accounts():
+    if not ACCOUNTS_FILE.exists():
+        return []
+    try:
+        data = json.loads(ACCOUNTS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def save_local_account(account):
+    accounts = [item for item in load_local_accounts() if item.get("email") != account["email"]]
+    accounts.append(account)
+    ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = ACCOUNTS_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(accounts, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(ACCOUNTS_FILE)
+
 
 def current_principal():
     principal = session.get("principal")
@@ -136,18 +159,26 @@ def csrf_token():
     return token
 
 
+def validate_local_auth_csrf():
+    expected = session.get("_csrf_token")
+    supplied = request.headers.get("X-CSRF-Token")
+    return bool(expected and supplied and secrets.compare_digest(expected, supplied))
+
+
 @app.before_request
 def require_authentication_and_csrf():
-    if request.endpoint in {"static", "healthz", "auth_login", "auth_callback"}:
+    if request.endpoint in {
+        "static", "healthz", "auth_login", "auth_callback", "auth_account",
+        "local_register", "local_login", "local_forgot", "local_reset",
+    }:
         return None
 
     if demo_auth_enabled():
         if current_principal() is None:
-            session["principal"] = {
-                "id": "local-demo",
-                "name": "Local development",
-                "role": "Citizen",
-            }
+            if request.path.startswith("/api/") and request.endpoint not in {
+                "session_info", "local_register", "local_login", "local_forgot", "local_reset",
+            }:
+                return jsonify({"error": "Sign in to use GPACT AI."}), 401
     elif not ENTRA_CONFIG or not ENTRA_OAUTH:
         if request.path.startswith("/api/"):
             return jsonify({"error": "Entra authentication is not configured for this deployment."}), 503
@@ -378,6 +409,9 @@ class SafeRedirectHandler(HTTPRedirectHandler):
 
 @app.get("/")
 def home():
+    principal = current_principal()
+    if principal is None:
+        return render_template("home.html", demo_auth_enabled=demo_auth_enabled())
     return render_template("index.html", demo_auth_enabled=demo_auth_enabled())
 
 
@@ -392,9 +426,20 @@ def healthz():
 
 @app.get("/auth/login")
 def auth_login():
+    if demo_auth_enabled():
+        return redirect(url_for("auth_account"))
     if not ENTRA_OAUTH or not ENTRA_CONFIG:
         return render_template("auth_setup.html"), 503
     return ENTRA_OAUTH.entra.authorize_redirect(ENTRA_CONFIG["redirect_uri"])
+
+
+@app.get("/auth/account")
+def auth_account():
+    if not demo_auth_enabled():
+        return redirect(url_for("auth_login"))
+    if current_principal() is not None:
+        return redirect(url_for("home"))
+    return render_template("auth_account.html", csrf_token=csrf_token())
 
 
 @app.get("/auth/callback")
@@ -419,12 +464,18 @@ def auth_callback():
 @app.post("/auth/logout")
 def auth_logout():
     session.clear()
+    if demo_auth_enabled():
+        session["demo_signed_out"] = True
+        return redirect(url_for("auth_account"))
     return redirect(url_for("home"))
 
 
 @app.get("/api/session")
 def session_info():
     principal = current_principal()
+    if principal is None and demo_auth_enabled():
+        principal = {"id": "local-demo", "name": "Local development", "role": "Citizen"}
+        session["principal"] = principal
     return jsonify({
         "user": {
             "id": principal["id"],
@@ -437,6 +488,122 @@ def session_info():
     })
 
 
+@app.post("/api/auth/register")
+def local_register():
+    if not demo_auth_enabled():
+        return jsonify({"error": "Local registration is disabled."}), 404
+    if not validate_local_auth_csrf():
+        return jsonify({"error": "The request failed CSRF validation. Refresh the page and try again."}), 403
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+    email = str(payload.get("email", "")).strip().lower()
+    password = str(payload.get("password", ""))
+    role = str(payload.get("role", "Citizen"))
+    if len(name) < 2 or len(name) > 160:
+        return jsonify({"error": "Enter your full name."}), 400
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return jsonify({"error": "Enter a valid email address."}), 400
+    if len(password) < 8:
+        return jsonify({"error": "Password must contain at least 8 characters."}), 400
+    if role not in ROLES:
+        return jsonify({"error": "Choose a valid role."}), 400
+    if any(account.get("email") == email for account in load_local_accounts()):
+        return jsonify({"error": "An account with this email already exists."}), 409
+    account = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "email": email,
+        "password_hash": generate_password_hash(password),
+        "role": role,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    save_local_account(account)
+    session.clear()
+    session["principal"] = {"id": account["id"], "name": name, "role": role}
+    csrf_token()
+    return jsonify({"message": "Registration complete.", "redirect": "/"})
+
+
+@app.post("/api/auth/login")
+def local_login():
+    if not demo_auth_enabled():
+        return jsonify({"error": "Local login is disabled."}), 404
+    if not validate_local_auth_csrf():
+        return jsonify({"error": "The request failed CSRF validation. Refresh the page and try again."}), 403
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get("email", "")).strip().lower()
+    password = str(payload.get("password", ""))
+    account = next(
+        (item for item in load_local_accounts() if item.get("email") == email),
+        None,
+    )
+    if not account or not check_password_hash(str(account.get("password_hash", "")), password):
+        return jsonify({"error": "Email or password is incorrect."}), 401
+    session.clear()
+    session["principal"] = {
+        "id": account["id"],
+        "name": account["name"],
+        "role": account["role"] if account.get("role") in ROLES else "Citizen",
+    }
+    csrf_token()
+    return jsonify({"message": "Signed in.", "redirect": "/"})
+
+
+@app.post("/api/auth/forgot")
+def local_forgot():
+    if not demo_auth_enabled():
+        return jsonify({"error": "Password recovery is disabled."}), 404
+    if not validate_local_auth_csrf():
+        return jsonify({"error": "The request failed CSRF validation. Refresh the page and try again."}), 403
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get("email", "")).strip().lower()
+    account = next(
+        (item for item in load_local_accounts() if item.get("email") == email),
+        None,
+    )
+    if account:
+        token = secrets.token_urlsafe(32)
+        LOCAL_RESET_TOKENS[hashlib.sha256(token.encode("utf-8")).hexdigest()] = {
+            "email": email,
+            "expires": time.time() + 30 * 60,
+        }
+        return jsonify({
+            "message": "A local demo reset token was generated.",
+            "reset_token": token,
+        })
+    return jsonify({
+        "message": "If an account exists for this email, reset instructions are available.",
+    })
+
+
+@app.post("/api/auth/reset")
+def local_reset():
+    if not demo_auth_enabled():
+        return jsonify({"error": "Password recovery is disabled."}), 404
+    if not validate_local_auth_csrf():
+        return jsonify({"error": "The request failed CSRF validation. Refresh the page and try again."}), 403
+    payload = request.get_json(silent=True) or {}
+    token = str(payload.get("token", "")).strip()
+    password = str(payload.get("password", ""))
+    if len(password) < 8:
+        return jsonify({"error": "Password must contain at least 8 characters."}), 400
+    token_key = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    reset = LOCAL_RESET_TOKENS.get(token_key)
+    if not reset or reset["expires"] < time.time():
+        LOCAL_RESET_TOKENS.pop(token_key, None)
+        return jsonify({"error": "This reset token is invalid or has expired."}), 400
+    account = next(
+        (item for item in load_local_accounts() if item.get("email") == reset["email"]),
+        None,
+    )
+    if not account:
+        return jsonify({"error": "This account no longer exists."}), 400
+    account["password_hash"] = generate_password_hash(password)
+    save_local_account(account)
+    LOCAL_RESET_TOKENS.pop(token_key, None)
+    return jsonify({"message": "Password updated. You can now sign in.", "redirect": "/auth/account"})
+
+
 @app.post("/api/demo-role")
 def demo_role():
     if not demo_auth_enabled():
@@ -446,6 +613,7 @@ def demo_role():
     if role not in ROLES:
         return jsonify({"error": "Choose a configured demo role."}), 400
     session["principal"] = {"id": "local-demo", "name": "Local development", "role": role}
+    session.pop("demo_signed_out", None)
     return jsonify({"user": session["principal"], "clearance": ROLE_MAX_CLEARANCE[role]})
 
 

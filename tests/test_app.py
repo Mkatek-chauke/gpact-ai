@@ -43,6 +43,27 @@ class AssistantApiTests(unittest.TestCase):
         response = self.client.post("/api/demo-role", json={"role": role})
         self.assertEqual(response.status_code, 200)
 
+    def test_signed_in_home_shows_the_dashboard_actions(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        for label in (
+            "Welcome,",
+            "Government Knowledge &amp; Policy Assistant",
+            "Ask a Question",
+            "Search Policy",
+            "Check Eligibility",
+            "Upload Documents",
+            "View Applications",
+            "Recent Activity",
+            "NSFAS Funding Rules",
+            "Housing Subsidy Query",
+            "Child Support Grant",
+        ):
+            self.assertIn(label, page)
+        self.assertNotIn("Indexed Repositories", page)
+        self.assertNotIn("Good decisions start", page)
+
     def test_public_answer_has_citation_and_source_is_openable(self):
         response = self.client.post("/api/chat", json={"question": "What must happen before official records are destroyed?"})
         self.assertEqual(response.status_code, 200)
