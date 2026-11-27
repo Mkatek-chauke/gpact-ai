@@ -719,6 +719,47 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(result["citations"][0]["owner"], "Department of Higher Education and Training")
         self.assertIn("financial aid", result["answer"])
 
+    def test_demo_upload_question_citation_and_source_open(self):
+        self.set_demo_role("Manager")
+        sample_path = Path(__file__).resolve().parents[1] / "demo-assets" / "records-retention-demo.txt"
+        with sample_path.open("rb") as sample, patch.object(rag, "groq_answer", return_value=None):
+            upload = self.client.post(
+                "/api/ingest",
+                data={
+                    "file": (sample, sample_path.name),
+                    "title": "Synthetic Demo Records Retention Procedure",
+                    "owner": "GPACT demo team (fictional)",
+                    "version": "1.0",
+                    "date": "2026-01-15",
+                    "repository": "Government DMS (simulated)",
+                    "classification": "Public",
+                    "status": "Current",
+                    "document_type": "Policy",
+                },
+                content_type="multipart/form-data",
+            )
+            self.assertEqual(upload.status_code, 201)
+            document_id = upload.get_json()["document"]["id"]
+
+            response = self.client.post(
+                "/api/chat",
+                json={"question": "How long are closed case files retained under this demo procedure?"},
+            )
+            result = response.get_json()
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("five years", result["answer"])
+            self.assertTrue(result["citations"])
+            citation = result["citations"][0]
+            self.assertEqual(citation["document_id"], document_id)
+            self.assertEqual(citation["section"], "1.1 Retention Period")
+            self.assertEqual(citation["version"], "1.0")
+
+            source = self.client.get(f"/documents/{document_id}")
+            self.assertEqual(source.status_code, 200)
+            page = source.get_data(as_text=True)
+            self.assertIn("This fictional sample is for demonstration only.", page)
+            self.assertIn("Government DMS (simulated)", page)
+
     def test_docx_upload_extracts_searchable_text_and_citation_section(self):
         document = Document()
         document.add_heading("Section 7 — Records", level=1)

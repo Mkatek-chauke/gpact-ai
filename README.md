@@ -4,6 +4,8 @@ A runnable demonstration of a source-grounded government policy assistant. It in
 
 > **Safety and deployment status:** The included corpus is synthetic/public-style sample content. Local demo roles are not authentication and are disabled on Vercel. Production sign-in requires Microsoft Entra configuration. The repository connectors are not yet implemented; do not ingest or store classified, confidential, or personal information. The assistant informs users and does not make government decisions.
 
+See the [Hackathon Demo Package](docs/hackathon-demo.md) for a reproducible upload-to-citation walkthrough, architecture overview, pilot notes, and five-minute pitch.
+
 ## Run locally with the JSON store
 
 ```powershell
