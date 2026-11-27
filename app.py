@@ -31,7 +31,6 @@ from govza import (
     import_category,
     import_department_site,
     list_national_departments,
-    search_official_government,
 )
 import storage
 
@@ -528,46 +527,9 @@ def chat():
         and isinstance(item.get("content"), str)
     ]
     answer, passages, provider = answer_question(question, history, documents, clearance)
-    local_provider = provider
-    lookup_unavailable = False
-    if not passages and not (
-        PERSONAL_DATA_RE.search(question) or PERSONAL_DATA_REQUEST_RE.search(question)
-    ):
-        try:
-            official_documents = search_official_government(question)
-        except ValueError as exc:
-            logger.warning("Official government search failed (%s)", type(exc).__name__)
-            official_documents = []
-            lookup_unavailable = True
-        if official_documents:
-            answer, passages, provider = answer_question(
-                question, history, official_documents, clearance
-            )
-            provider = f"Official gov.za search · {provider}"
-        elif lookup_unavailable:
-            if local_provider == "Local decision safeguard":
-                answer += " The official South African Government website search was unavailable."
-                provider = "Local decision safeguard · Official search unavailable"
-            else:
-                answer = (
-                    "I couldn't reach the official South African Government website search. "
-                    "Please try again later; I couldn't find supporting information in the indexed documents."
-                )
-                provider = "Official government search unavailable"
-        else:
-            if local_provider == "Local decision safeguard":
-                provider = "Local decision safeguard · Official gov.za search"
-            else:
-                answer = (
-                    "I couldn't find supporting information in the indexed documents or matching "
-                    "pages on the official South African Government website."
-                )
-                provider = "Official gov.za search"
     audit_event(
         "chat",
-        outcome="answered" if passages else (
-            "official_search_unavailable" if lookup_unavailable else "no_evidence"
-        ),
+        outcome="answered" if passages else "no_evidence",
     )
     current_versions = {}
     for document in documents:

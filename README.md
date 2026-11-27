@@ -37,8 +37,6 @@ python app.py
 
 If Neon writes the URL to `.env`, use that file instead. Keep `.env` and `.env.local` private; they are gitignored. The app creates a `government_documents` table, seeds it from the included JSON corpus when the database is empty, and then reads/writes documents in Postgres. Without a Neon URL it falls back to the local JSON store. Use a Neon pooled connection string for web deployments.
 
-The Neon project is linked to organization `org-tiny-salad-44594756`, project `crimson-voice-69979260`, branch `production`; `neon.ts` has no paid services or branch policies configured.
-
 ## Deploy on Vercel
 
 The repo includes `vercel.json`, a Flask/Python entrypoint, and CDN-served assets under `public/static/`. In Vercel's **New Project** screen, select this GitHub repo, keep Root Directory as `./`, choose the **Flask** preset, leave Output Directory blank, and deploy. The configured Build Command is `npm run build`.
@@ -64,7 +62,7 @@ These are not required for Neon Postgres or for the local extractive-answer mode
 - Gov.za imports are restricted to the `gov.za`/`www.gov.za` hosts, HTTPS, public classification, 15 MB PDFs, one to five documents per request, and readable PDF text.
 - The ingestion dialog can also load the current national-department website directory from gov.za and import up to two policy-related PDFs from one selected department per run. It stays on the directory-listed HTTPS host, checks robots.txt, and marks publication currency as `Unverified`; check the original source before relying on it.
 - Citations for imported public PDFs open the original PDF, with the department page retained as additional source context. Scanned/image-only PDFs need OCR tooling to be configured; otherwise they cannot be indexed as text.
-- When indexed documents do not answer a question, chat sends the question to the official South African Government site (`gov.za`) for live search, reads up to three matching result pages, and cites the original page. These public pages are available to every signed-in role; their publication status is marked `Unverified`, and detected email, phone-number, and national-ID patterns are redacted before retrieval. Search is bounded to gov.za, not an exhaustive search of every department website, and does not guarantee every document is current.
+- Chat answers use only indexed documents the user is authorised to access. Official government sources must be explicitly imported into the library before they can support an answer; when the library has no relevant evidence, the assistant says so and suggests a policy owner or records officer.
 - The department importer is deliberately bounded to one policy-related page and two PDFs per request; check original sources before relying on them.
 - No question history is persisted, and source/query content is not written to application logs. Decision requests are answered with policy information rather than an approval/rejection.
 - Uploaded PDFs are limited to 200 pages; scanned PDFs are limited to 40 pages and OCR uses one worker, 150 DPI, and a 30-second conversion timeout. Tesseract and Poppler must be installed locally for scanned-PDF OCR.

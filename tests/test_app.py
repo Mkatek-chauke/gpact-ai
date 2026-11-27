@@ -27,17 +27,12 @@ class AssistantApiTests(unittest.TestCase):
         self.groq_key_patch.start()
         self.demo_auth_patch = patch.object(application, "demo_auth_enabled", return_value=True)
         self.demo_auth_patch.start()
-        self.official_search_patch = patch.object(
-            application, "search_official_government", return_value=[]
-        )
-        self.official_search_patch.start()
         self.client = application.app.test_client()
         session_response = self.client.get("/api/session")
         self.assertEqual(session_response.status_code, 200)
         self.client.environ_base["HTTP_X_CSRF_TOKEN"] = session_response.get_json()["csrf_token"]
 
     def tearDown(self):
-        self.official_search_patch.stop()
         self.demo_auth_patch.stop()
         self.groq_key_patch.stop()
         self.database_url_patch.stop()
@@ -101,77 +96,20 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(analyst_answer["citations"][0]["classification"], "Internal")
 
     def test_unknown_question_says_no_evidence(self):
-        response = self.client.post(
-            "/api/chat",
-            json={"question": "What is the moon made of?"},
-        )
+        with patch.object(
+            govza,
+            "fetch_text",
+            side_effect=AssertionError("chat must not fetch live sources"),
+        ) as fetch:
+            response = self.client.post(
+                "/api/chat",
+                json={"question": "What is the moon made of?"},
+            )
         result = response.get_json()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(result["citations"], [])
         self.assertIn("couldn't find", result["answer"])
-
-    def test_unanswered_public_question_searches_official_sources_for_every_role(self):
-        result_html = """
-        <table><tr>
-          <td class="views-field views-field-title">
-            <a href="/about-government/government-system/home-affairs">Home Affairs</a>
-          </td>
-          <td class="views-field views-field-gov-search-result-date">02 Mar 2026</td>
-        </tr></table>
-        """
-        page_html = """
-        <html><body><nav>Navigation noise</nav><main>
-          <h1>Home Affairs</h1>
-          <p>The Department of Home Affairs manages citizenship, immigration,
-          passports and identity services under national legislation.</p>
-          <p>Department contact: 082 330 1404</p>
-        </main></body></html>
-        """
-        with patch.object(
-            govza, "fetch_text", side_effect=[result_html, page_html, result_html, page_html]
-        ) as fetch:
-            with patch.object(
-                application, "search_official_government", govza.search_official_government
-            ):
-                for role in ("Citizen", "Officer"):
-                    self.set_demo_role(role)
-                    response = self.client.post(
-                        "/api/chat",
-                        json={"question": "What does Home Affairs do about citizenship and immigration?"},
-                    )
-                    self.assertEqual(response.status_code, 200)
-                    result = response.get_json()
-                    self.assertIn("[C1]", result["answer"])
-                    self.assertTrue(result["provider"].startswith("Official gov.za search"))
-                    self.assertEqual(result["citations"][0]["classification"], "Public")
-                    self.assertEqual(
-                        result["citations"][0]["source_url"],
-                        "https://www.gov.za/about-government/government-system/home-affairs",
-                    )
-                    self.assertNotIn("082 330 1404", result["answer"])
-                    self.assertEqual(
-                        len({item["document_id"] for item in result["citations"]}),
-                        len(result["citations"]),
-                    )
-                    self.assertTrue(any("could not be verified" in item for item in result["warnings"]))
-        self.assertEqual(fetch.call_count, 4)
-        self.assertNotIn(
-            "Home Affairs",
-            [document["title"] for document in application.load_documents()],
-        )
-
-    def test_official_search_failure_is_reported_without_hiding_local_result(self):
-        with patch.object(
-            application, "search_official_government", side_effect=ValueError("network unavailable")
-        ):
-            response = self.client.post(
-                "/api/chat", json={"question": "What is the moon made of?"}
-            )
-        self.assertEqual(response.status_code, 200)
-        result = response.get_json()
-        self.assertEqual(result["provider"], "Official government search unavailable")
-        self.assertIn("couldn't reach", result["answer"])
-        self.assertEqual(result["citations"], [])
+        fetch.assert_not_called()
 
     def test_unknown_classification_fails_closed_for_listing_and_retrieval(self):
         documents = application.load_documents()
@@ -308,26 +246,6 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(title, "Public Administration Act 7 of 2025")
         self.assertEqual(date, "01 Apr 2026")
         self.assertEqual(pdf_links, ["https://www.gov.za/sites/default/files/gcis_document/202604/public-administration.pdf"])
-
-    def test_official_search_parsers_extract_page_content_without_navigation(self):
-        search_html = """
-        <table><tr>
-          <td class="views-field-title"><a href="/about-government/home-affairs">Home Affairs</a></td>
-          <td class="views-field-gov-search-result-date">02 Mar 2026</td>
-        </tr></table>
-        """
-        parser = govza.OfficialSearchResultParser()
-        parser.feed(search_html)
-        self.assertEqual(parser.results[0]["title"], "Home Affairs")
-        self.assertEqual(parser.results[0]["date"], "02 Mar 2026")
-        self.assertEqual(parser.results[0]["url"], "https://www.gov.za/about-government/home-affairs")
-
-        page_parser = govza.OfficialPageTextParser()
-        page_parser.feed(
-            '<nav>Ignored</nav><div id="collapseSearch">Search gov.za</div>'
-            "<main><h1>Home Affairs</h1><p>Official policy text.</p></main>"
-        )
-        self.assertEqual(page_parser.text(), "Home Affairs\n\nOfficial policy text.")
 
     def test_department_directory_parser_uses_official_government_hosts_only(self):
         directory_html = '''

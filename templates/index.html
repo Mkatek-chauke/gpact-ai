@@ -13,7 +13,7 @@
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="GPACT AI home">
         <span class="brand-mark">G</span>
-        <span><strong>GPACT <span>AI</span></strong><small>PUBLIC SERVICE KNOWLEDGE</small></span>
+        <span><strong>GPACT <span>AI</span></strong><small>POLICY &amp; GOVERNANCE</small></span>
       </a>
       <div class="side-label">WORKSPACE</div>
       <button class="nav-item active" id="newChat"><span class="nav-icon">✳</span> New conversation</button>
@@ -37,7 +37,7 @@
         <section class="welcome" id="welcome">
           <div class="eyebrow"><span class="eyebrow-line"></span> GOVERNMENT POLICY ACCESS</div>
           <h1>Good decisions start<br>with <em>clear evidence.</em></h1>
-          <p>Ask a question about legislation, policy, or governance. Every answer is grounded in your authorised documents and linked to its source.</p>
+          <p>Ask about legislation, policy, or governance. Answers use only documents you are authorised to access, with source links; when the library has no evidence, the assistant says so.</p>
           <div class="trust-pills"><span><span>✓</span> Source-cited answers</span><span><span>✓</span> Version-aware</span><span><span>✓</span> Access-controlled</span></div>
           <div class="suggestion-label">TRY ASKING</div>
           <div class="suggestions">
@@ -56,7 +56,7 @@
         </div>
         <section class="library hidden" id="library">
           <div class="library-head"><div><div class="eyebrow">YOUR SOURCES</div><h2>Knowledge library</h2></div><button id="libraryAdd" class="primary-button">＋ Add document</button></div>
-          <p class="library-sub">Documents you are authorised to access across connected repositories.</p>
+          <p class="library-sub">Indexed documents you are authorised to access.</p>
           <div id="documentList" class="document-list"></div>
         </section>
       </div>
@@ -67,7 +67,7 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="modal-head"><div><span class="modal-kicker">KNOWLEDGE LIBRARY</span><h2 id="modalTitle">Add a source document</h2></div><button class="icon-button close-modal" aria-label="Close">×</button></div>
       <p class="modal-copy">Index an approved, non-sensitive document or public web page. Only upload content you are authorised to share.</p>
-      <div class="ingest-tabs"><button class="tab active" data-tab="file">Upload document</button><button class="tab" data-tab="url">Import public web page</button><button class="tab" data-tab="govza">Import gov.za</button><button class="tab" data-tab="department">Department PDFs</button></div>
+      <div class="ingest-tabs"><button class="tab active" data-tab="file">Upload document</button><button class="tab" data-tab="url">Import public web page</button><button class="tab" data-tab="govza">Import gov.za</button><button class="tab" data-tab="department">Department website</button></div>
       <form id="fileForm">
         <label class="file-drop" for="fileInput"><span class="upload-mark">↑</span><strong>Choose a document to upload</strong><small>PDF, Word, TXT or Markdown · up to 15 MB</small><input type="file" id="fileInput" name="file" accept=".pdf,.docx,.txt,.md" required><span id="fileName" class="file-name"></span></label>
         <div class="form-grid">
