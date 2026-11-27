@@ -31,6 +31,7 @@ from govza import (
     import_category,
     import_department_site,
     list_national_departments,
+    search_official_government,
 )
 import storage
 
@@ -527,7 +528,32 @@ def chat():
         and isinstance(item.get("content"), str)
     ]
     answer, passages, provider = answer_question(question, history, documents, clearance)
-    audit_event("chat", outcome="answered" if passages else "no_evidence")
+    lookup_unavailable = False
+    if not passages and not (
+        PERSONAL_DATA_RE.search(question) or PERSONAL_DATA_REQUEST_RE.search(question)
+    ):
+        try:
+            official_documents = search_official_government(question)
+        except ValueError as exc:
+            logger.warning("Official government search failed (%s)", type(exc).__name__)
+            official_documents = []
+            lookup_unavailable = True
+        if official_documents:
+            answer, passages, provider = answer_question(
+                question, history, official_documents, clearance
+            )
+        elif lookup_unavailable:
+            answer = (
+                "I couldn't reach the official South African Government website search. "
+                "Please try again later; I couldn't find supporting information in the indexed documents."
+            )
+            provider = "Official government search unavailable"
+    audit_event(
+        "chat",
+        outcome="answered" if passages else (
+            "official_search_unavailable" if lookup_unavailable else "no_evidence"
+        ),
+    )
     current_versions = {}
     for document in documents:
         key = document.get("version_family", document["title"].casefold())
@@ -560,7 +586,7 @@ def chat():
             warnings.append(f'{item["title"]} version {item["version"]} is a draft and is not approved.')
         elif item["status"] == "Unverified":
             warnings.append(
-                f'{item["title"]} was found on an official department website, '
+                f'{item["title"]} was found on an official government website, '
                 "but its current publication status could not be verified."
             )
     return jsonify({

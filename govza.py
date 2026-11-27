@@ -1,4 +1,5 @@
 import html
+import hashlib
 import io
 import ipaddress
 import re
@@ -7,10 +8,11 @@ import time
 from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
 from urllib.robotparser import RobotFileParser
-from urllib.parse import urljoin, urlparse, urldefrag
+from urllib.parse import urljoin, urlparse, urldefrag, urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from pypdf import PdfReader
+from rag import PERSONAL_DATA_RE
 
 
 BASE_URL = "https://www.gov.za/"
@@ -38,6 +40,7 @@ CATEGORY_PREFIXES = {
 }
 USER_AGENT = "GPACT-AI-Policy-Demo/1.0 (public-document-ingestion)"
 DEPARTMENT_DIRECTORY = urljoin(BASE_URL, "about-government/government-system/national-departments")
+MAX_OFFICIAL_PAGE_TEXT = 4_000
 POLICY_TERMS = re.compile(
     r"\b(policy|policies|legislation|regulation|circular|framework|guideline|standard|"
     r"directive|gazette|act|white paper|green paper|strategy)\b",
@@ -69,6 +72,96 @@ class DirectoryLinkParser(HTMLParser):
             self._text = []
 
 
+class OfficialSearchResultParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.results = []
+        self._row = None
+        self._cell = None
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag == "tr":
+            self._row = {}
+        elif tag == "td" and self._row is not None:
+            classes = attributes.get("class", "").split()
+            if "views-field-title" in classes:
+                self._cell = "title"
+                self._row["title"] = []
+            elif "views-field-gov-search-result-date" in classes:
+                self._cell = "date"
+                self._row["date"] = []
+        elif tag == "a" and self._cell == "title" and self._row is not None:
+            self._row["url"] = attributes.get("href")
+
+    def handle_data(self, data):
+        if self._cell and self._row is not None:
+            self._row[self._cell].append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "td":
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            title = re.sub(r"\s+", " ", " ".join(self._row.get("title", []))).strip()
+            raw_url = self._row.get("url")
+            if title and raw_url:
+                result = {"title": title, "url": urljoin(BASE_URL, html.unescape(raw_url))}
+                result["date"] = re.sub(
+                    r"\s+", " ", " ".join(self._row.get("date", []))
+                ).strip()
+                self.results.append(result)
+            self._row = None
+            self._cell = None
+
+
+class OfficialPageTextParser(HTMLParser):
+    SKIP_TAGS = {"script", "style", "nav", "header", "footer", "form"}
+    BLOCK_TAGS = {
+        "article", "br", "div", "h1", "h2", "h3", "h4", "li", "p", "section", "tr",
+    }
+
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+        self._skip_stack = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if self._skip_stack:
+            if tag not in {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}:
+                self._skip_stack.append(tag)
+            return
+        classes = attributes.get("class", "").casefold()
+        element_id = attributes.get("id", "").casefold()
+        if (
+            tag in self.SKIP_TAGS
+            or "search" in classes
+            or "menu" in classes
+            or "breadcrumb" in classes
+            or "visually-hidden" in classes
+            or "search" in element_id
+        ):
+            self._skip_stack.append(tag)
+        elif tag in self.BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self._skip_stack:
+            self.parts.append(data)
+
+    def handle_endtag(self, tag):
+        if self._skip_stack:
+            for index in range(len(self._skip_stack) - 1, -1, -1):
+                if self._skip_stack[index] == tag:
+                    del self._skip_stack[index:]
+                    break
+        elif tag in self.BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def text(self):
+        return re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]+", " ", "".join(self.parts))).strip()
+
+
 class SameHostRedirectHandler(HTTPRedirectHandler):
     def __init__(self, expected_host):
         super().__init__()
@@ -78,6 +171,20 @@ class SameHostRedirectHandler(HTTPRedirectHandler):
         parsed = urlparse(newurl)
         if parsed.scheme != "https" or parsed.hostname != self.expected_host:
             raise ValueError("The official site redirected outside its verified HTTPS host.")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+class GovZaRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        parsed = urlparse(newurl)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in {"gov.za", "www.gov.za"}
+            or parsed.username
+            or parsed.password
+            or parsed.port not in (None, 443)
+        ):
+            raise ValueError("The official gov.za site redirected outside its verified HTTPS hosts.")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -276,8 +383,9 @@ def validate_gov_url(raw_url):
 def fetch_text(raw_url, timeout=45):
     validate_gov_url(raw_url)
     request = Request(raw_url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,*/*"})
+    opener = build_opener(GovZaRedirectHandler())
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with opener.open(request, timeout=timeout) as response:
             if response.status != 200:
                 raise ValueError("The public gov.za page could not be fetched.")
             content_type = response.headers.get("Content-Type", "")
@@ -288,6 +396,87 @@ def fetch_text(raw_url, timeout=45):
         raise ValueError("Gov.za timed out. Try again or use a smaller document limit.") from exc
     except URLError as exc:
         raise ValueError("Gov.za could not be reached. Check the network and try again.") from exc
+
+
+def search_official_government(question, limit=3):
+    """Fetch a few relevant, public pages from the official South African Government site."""
+    limit = max(1, min(int(limit), 5))
+    search_url = urljoin(
+        BASE_URL,
+        "search?" + urlencode({"search_query": str(question)[:128]}),
+    )
+    search_html = fetch_text(search_url, timeout=10)
+    parser = OfficialSearchResultParser()
+    parser.feed(search_html)
+
+    stop_words = {
+        "about", "after", "all", "and", "are", "before", "can", "does", "for", "from",
+        "how", "into", "is", "may", "must", "not", "of", "on", "or", "should", "that",
+        "the", "their", "them", "this", "under", "was", "what", "when", "where", "which",
+        "who", "why", "with", "would",
+    }
+
+    def search_terms(text):
+        terms = re.findall(r"[a-z0-9][a-z0-9'-]*", text.casefold())
+        normalized = set()
+        for term in terms:
+            if term in stop_words or len(term) < 3:
+                continue
+            if term.endswith("ies") and len(term) > 4:
+                term = term[:-3] + "y"
+            elif term.endswith("s") and not term.endswith("ss"):
+                term = term[:-1]
+            normalized.add(term)
+        return normalized
+
+    query_terms = search_terms(question)
+    ranked_results = []
+    for result in parser.results:
+        overlap = len(query_terms.intersection(search_terms(result["title"])))
+        if overlap:
+            ranked_results.append((overlap, result))
+    ranked_results.sort(key=lambda item: item[0], reverse=True)
+
+    documents = []
+    seen = set()
+    for _, result in ranked_results:
+        try:
+            parsed = validate_gov_url(result["url"])
+        except ValueError:
+            continue
+        if parsed.path.lower().endswith(".pdf") or result["url"] in seen:
+            continue
+        seen.add(result["url"])
+        page_html = fetch_text(result["url"], timeout=8)
+        text_parser = OfficialPageTextParser()
+        text_parser.feed(page_html)
+        text = re.sub(r"\s+", " ", text_parser.text()).strip()
+        text = PERSONAL_DATA_RE.sub(
+            "[redacted personal information]", text
+        )[:MAX_OFFICIAL_PAGE_TEXT]
+        if len(text) < 80:
+            continue
+        source_url = parsed.geturl()
+        documents.append({
+            "id": "govza-live-" + hashlib.sha256(source_url.encode("utf-8")).hexdigest()[:16],
+            "title": result["title"],
+            "section": "Official government webpage",
+            "version": "Live webpage",
+            "version_family": source_url,
+            "status": "Unverified",
+            "classification": "Public",
+            "clearance_rank": 0,
+            "owner": "South African Government",
+            "date": result.get("date") or "Unverified",
+            "repository": "Official government websites",
+            "document_type": "Official government webpage",
+            "source_url": source_url,
+            "page_url": source_url,
+            "text": text,
+        })
+        if len(documents) >= limit:
+            break
+    return documents
 
 
 def parse_category_items(html_text, limit=5, prefix=None):
