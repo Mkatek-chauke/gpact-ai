@@ -59,24 +59,35 @@
     }
     .hero-links { display: flex; gap: 12px; margin-top: 28px; }
     .hero-links a { min-width: 150px; }
-    .architecture {
+    .search-guide {
       background: #fff;
       border: 1px solid #e5eaf0;
       border-radius: 14px;
-      padding: 22px;
+      padding: 24px;
       box-shadow: 0 18px 50px rgba(16,44,73,.08);
     }
-    .architecture h2 { margin: 0 0 16px; font-size: 14px; color: #31516f; }
-    .flow-item {
+    .search-guide h2 { margin: 0 0 6px; font-size: 18px; color: #243d56; }
+    .search-guide-intro { margin: 0 0 18px; color: #7e8d9d; font-size: 13px; line-height: 1.6; }
+    .question-example {
+      display: block;
+      padding: 13px 14px;
+      margin-top: 9px;
       border: 1px solid #e7ebf1;
       border-radius: 9px;
-      padding: 13px 14px;
-      margin-top: 8px;
       background: #fbfcfe;
+      color: #31516f;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.5;
     }
-    .flow-item strong { display: block; color: #243d56; font-size: 14px; }
-    .flow-item small { display: block; margin-top: 4px; color: #8794a3; font-size: 12px; }
-    .flow-arrow { text-align: center; color: #82a4c1; height: 20px; line-height: 20px; }
+    .search-guide-note {
+      margin: 17px 0 0;
+      padding-top: 14px;
+      border-top: 1px solid #e7ebf1;
+      color: #718195;
+      font-size: 12px;
+      line-height: 1.65;
+    }
     .features {
       max-width: 1120px;
       margin: 0 auto;
@@ -138,13 +149,13 @@
         </div>
       </div>
 
-      <aside class="architecture" aria-label="GPACT AI architecture">
-        <h2>Simple, source-grounded workflow</h2>
-        <div class="flow-item"><strong>Frontend</strong><small>Chat interface</small></div>
-        <div class="flow-arrow">↓</div>
-        <div class="flow-item"><strong>Backend API</strong><small>Authentication and document retrieval</small></div>
-        <div class="flow-arrow">↓</div>
-        <div class="flow-item"><strong>AI and knowledge</strong><small>Azure/OpenAI · vector search · policy documents</small></div>
+      <aside class="search-guide" aria-labelledby="searchGuideTitle">
+        <h2 id="searchGuideTitle">Questions you can ask</h2>
+        <p class="search-guide-intro">Use everyday language. Name a programme, policy or service to help narrow your search.</p>
+        <div class="question-example">How do I apply for the Child Support Grant?</div>
+        <div class="question-example">What does this policy require before records are destroyed?</div>
+        <div class="question-example">Which version of this document is current?</div>
+        <p class="search-guide-note">Open the cited source to check its section, version and status. Answers depend on information available in the sources searched; verify important details before acting.</p>
       </aside>
     </section>
 
