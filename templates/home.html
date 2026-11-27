@@ -18,7 +18,8 @@
       margin: 0 auto;
       padding: 0 28px;
     }
-    .landing-actions { display: flex; gap: 10px; }
+    .landing-nav .brand { margin: 0; }
+    .landing-actions { display: flex; gap: 10px; flex-shrink: 0; }
     .landing-actions a {
       min-height: 42px;
       display: inline-flex;
@@ -112,6 +113,18 @@
       .features { padding-right: 18px; padding-left: 18px; }
       .hero h1 { letter-spacing: -2px; }
     }
+    @media (max-width: 600px) {
+      .landing-nav { width: 100%; height: auto; min-height: 64px; gap: 10px; padding: 10px 18px; }
+      .landing-nav .brand { gap: 8px; }
+      .landing-actions { gap: 6px; }
+      .landing-actions a { min-height: 38px; padding: 0 10px; font-size: 12px; }
+    }
+    @media (max-width: 380px) {
+      .landing-nav { padding-right: 12px; padding-left: 12px; }
+      .landing-nav .brand small { display: none; }
+      .landing-nav .brand strong { font-size: 14px; }
+      .landing-actions a { padding: 0 8px; font-size: 11px; }
+    }
   </style>
 </head>
 <body>
@@ -136,8 +149,8 @@
         <div class="eyebrow"><span class="eyebrow-line"></span> GOVERNMENT POLICY ACCESS</div>
         <h1>Clear evidence.<br><em>Better decisions.</em></h1>
         <p class="hero-copy">
-          Ask grounded questions about legislation, policy, and governance.
-          GPACT AI searches authorised documents and links every answer to its source.
+          Ask questions on any topic. GPACT AI searches your authorised documents
+          and the public web, with source links so you can verify the answer.
         </p>
         <div class="hero-links">
           {% if demo_auth_enabled %}

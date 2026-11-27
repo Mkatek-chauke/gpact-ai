@@ -881,7 +881,6 @@ def chat():
     ]
     should_search_web = (
         document_id is None
-        and ("all" in source_filters or "department_websites" in source_filters)
         and groq_web_search_enabled()
         and bool(os.getenv("GROQ_API_KEY", "").strip())
     )
@@ -909,12 +908,15 @@ def chat():
         warnings.append("AI answer generation is unavailable; the response was extracted from the cited passages.")
     elif provider.startswith("Local extractive retrieval (AI answer rejected"):
         warnings.append("The AI answer failed citation checks; the response was extracted from the cited passages.")
-    if "official web search unavailable" in provider.lower() or provider == "Groq web search unavailable":
-        warnings.append("Live search is unavailable; only indexed project documents could support this response.")
-    elif "no relevant official web results" in provider.lower() or provider == "Groq web search (no relevant official results)":
-        warnings.append("No relevant official website results were found; indexed project documents were searched.")
+    if "public web search unavailable" in provider.lower():
+        warnings.append(
+            "Live web search could not connect securely to Groq. Check network access and TLS certificate trust; "
+            "certificate verification remains enabled."
+        )
+    elif "no relevant public web results" in provider.lower():
+        warnings.append("No relevant public web pages were returned; indexed project documents were also searched.")
     elif "web search skipped for non-public context" in provider.lower():
-        warnings.append("Live search was skipped because matching project sources are not public.")
+        warnings.append("Live web search was skipped because matching project sources are not public.")
     for item in passages:
         citation = {
             "ref": item["ref"],
@@ -941,10 +943,16 @@ def chat():
         elif item["status"] == "Draft":
             warnings.append(f'{item["title"]} version {item["version"]} is a draft and is not approved.')
         elif item["status"] == "Unverified":
-            warnings.append(
-                f'{item["title"]} was found on an official government website, '
-                "but its current publication status could not be verified."
-            )
+            if item.get("source_type") == "live_web":
+                warnings.append(
+                    f'{item["title"]} is a live web result; its publisher, date, and current status '
+                    "could not be independently verified."
+                )
+            else:
+                warnings.append(
+                    f'{item["title"]} was found on an official government website, '
+                    "but its current publication status could not be verified."
+                )
     related_documents = list({
         item["document_id"]: {
             "id": item["document_id"],
@@ -956,9 +964,14 @@ def chat():
         }
         for item in passages
     }.values())
+    retrieval_scores = [
+        item["score"]
+        for item in passages
+        if isinstance(item.get("score"), (int, float))
+    ]
     confidence_score = (
-        round(min(100, max(0, max(item["score"] for item in passages) * 100)))
-        if passages else None
+        round(min(100, max(0, max(retrieval_scores) * 100)))
+        if retrieval_scores else None
     )
     return jsonify({
         "answer": answer,

@@ -164,10 +164,8 @@ function updateSourceTransparency() {
   if (!$("#sourceTransparency")) return;
   const filters = selectedSourceFilters();
   const label = filters.includes("all") ? "all indexed source categories" : `${filters.length} selected indexed ${filters.length === 1 ? "category" : "categories"}`;
-  const searchWebsite = state.liveSearchEnabled
-    && !state.documentContextId
-    && (filters.includes("all") || filters.includes("department_websites"));
-  const webSources = searchWebsite ? " + official government websites" : "";
+  const searchWebsite = state.liveSearchEnabled && !state.documentContextId;
+  const webSources = searchWebsite ? " + public web" : "";
   $("#sourceTransparency").textContent = `Searching ${label}${webSources} · ${state.documents.length} accessible indexed ${state.documents.length === 1 ? "document" : "documents"}`;
 }
 
@@ -221,7 +219,7 @@ function renderAnswer(result) {
         <a class="citation" id="citation-${escapeHtml(citation.ref)}" href="${escapeHtml(citation.source_url && citation.source_url.startsWith("https://") ? citation.source_url : `/documents/${encodeURIComponent(citation.document_id)}`)}" target="_blank" rel="noopener">
           <span class="cite-ref">${escapeHtml(citation.ref)}</span><span class="cite-details"><strong>${escapeHtml(citation.title)}</strong>
           <small>${citation.source_type === "live_web"
-            ? `Official website · ${escapeHtml(citation.owner || "Department not identified")} · ${escapeHtml(citation.status)}`
+            ? `Public website · ${escapeHtml(citation.owner || "Publisher not identified")} · ${escapeHtml(citation.status)}`
             : `${escapeHtml(citation.section)} · v${escapeHtml(citation.version)} · ${escapeHtml(citation.status)} · ${escapeHtml(citation.repository)} · ${escapeHtml(citation.owner || "Department not specified")}${citation.page_url ? ` · Source page: ${escapeHtml(citation.page_url)}` : ""}`}</small></span>
         </a>`).join("")}
     </div>` : "";
@@ -235,14 +233,14 @@ function renderAnswer(result) {
         </a>`).join("") : '<p>No additional related documents were found in the selected sources.</p>'}
     </div>` : "";
   const confidence = result.confidence_score == null ? "—" : `${result.confidence_score}%`;
-  const department = result.relevant_department || "Not identified in the matched source metadata";
-  const departmentLabel = result.citations.some((citation) => citation.source_type === "live_web")
-    ? "Relevant Department / Official Site"
+  const publisher = result.relevant_department || "Not identified in the matched source metadata";
+  const publisherLabel = result.citations.some((citation) => citation.source_type === "live_web")
+    ? "Publisher / Website"
     : "Relevant Government Department";
   const answerMetadata = hasEvidence ? `
     <div class="answer-metrics">
       <div><small>Confidence Score</small><strong>${confidence}</strong><span>Retrieval match only; not a measure of correctness.</span></div>
-      <div><small>${departmentLabel}</small><strong>${escapeHtml(department)}</strong></div>
+      <div><small>${publisherLabel}</small><strong>${escapeHtml(publisher)}</strong></div>
     </div>
     ${citations}${related}
     <div class="answer-footer">${escapeHtml(result.disclaimer)}</div>` : "";
@@ -266,12 +264,9 @@ async function ask(question) {
   setView("conversation");
   const pending = document.createElement("div");
   pending.className = "typing";
-  const selectedFilters = selectedSourceFilters();
-  const includesLiveWeb = state.liveSearchEnabled
-    && !state.documentContextId
-    && (selectedFilters.includes("all") || selectedFilters.includes("department_websites"));
+  const includesLiveWeb = state.liveSearchEnabled && !state.documentContextId;
   pending.textContent = includesLiveWeb
-    ? "Searching indexed documents and official government websites…"
+    ? "Searching indexed documents and the public web…"
     : "Searching authorised indexed sources…";
   conversation.append(pending);
   conversation.scrollIntoView({ block: "end", behavior: "smooth" });

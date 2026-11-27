@@ -8,7 +8,7 @@ from integrations import groq_answer, groq_web_search
 logger = logging.getLogger(__name__)
 WORD_RE = re.compile(r"[a-z0-9][a-z0-9'-]*", re.I)
 NO_EVIDENCE_ANSWER = (
-    "I couldn't find supporting information for that question in the official government sources currently available."
+    "I couldn't find supporting information for that question in the available sources."
 )
 STOP_WORDS = {
     "a", "about", "after", "also", "an", "and", "are", "as", "at", "be",
@@ -244,6 +244,35 @@ def _combine_passages(local_passages, web_passages):
     return selected
 
 
+def _web_search_passages(documents):
+    passages = []
+    for document in documents[:5]:
+        text = document.get("text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        score = document.get("score")
+        passages.append({
+            "id": f'{document["id"]}-search-result',
+            "text": text.strip(),
+            "section": "Search result excerpt",
+            "document_id": document["id"],
+            "title": document["title"],
+            "version_family": document["title"].casefold(),
+            "version": document["version"],
+            "status": document["status"],
+            "classification": document["classification"],
+            "owner": document["owner"],
+            "date": document["date"],
+            "repository": document["repository"],
+            "document_type": document.get("document_type", "Web page"),
+            "source_url": document.get("source_url"),
+            "page_url": document.get("page_url"),
+            "source_type": "live_web",
+            "score": score if isinstance(score, (int, float)) else None,
+        })
+    return passages
+
+
 def _all_sentences_cited(answer, passages):
     allowed = {f'[{item["ref"]}]' for item in passages}
     sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", answer) if part.strip()]
@@ -303,18 +332,20 @@ def answer_question(
             try:
                 web_documents = groq_web_search(retrieval_question)
                 web_passages = rank_passages(retrieval_question, web_documents, 0)
+                if not web_passages:
+                    web_passages = _web_search_passages(web_documents)
             except Exception as exc:
                 logger.warning(
-                    "Groq official web search unavailable (%s).",
+                    "Groq public web search unavailable (%s).",
                     type(exc).__name__,
                 )
                 web_search_failed = True
     passages = _combine_passages(passages, web_passages)
     if not passages:
         if web_search_failed:
-            return NO_EVIDENCE_ANSWER, [], "Groq web search unavailable"
+            return NO_EVIDENCE_ANSWER, [], "Groq public web search unavailable"
         if web_search_attempted:
-            return NO_EVIDENCE_ANSWER, [], "Groq web search (no relevant official results)"
+            return NO_EVIDENCE_ANSWER, [], "Groq public web search (no relevant results)"
         return NO_EVIDENCE_ANSWER, [], "Local extractive retrieval"
 
     answer = None
@@ -336,7 +367,7 @@ def answer_question(
                 return NO_EVIDENCE_ANSWER, [], "Groq"
             if candidate and _all_sentences_cited(candidate, passages):
                 answer = candidate
-                provider = "Groq + official web search" if web_passages else "Groq"
+                provider = "Groq + public web search" if web_passages else "Groq"
             elif candidate:
                 logger.warning("Groq answer omitted required source citations; using local answer.")
                 provider = "Local extractive retrieval (AI answer rejected)"
@@ -350,11 +381,11 @@ def answer_question(
     if answer is None:
         answer = _fallback_answer(passages)
     if web_search_failed:
-        provider += " (official web search unavailable)"
+        provider += " (public web search unavailable)"
     elif web_search_skipped:
-        provider += " (official web search skipped for non-public context)"
+        provider += " (public web search skipped for non-public context)"
     elif web_search_attempted and not web_passages:
-        provider += " (no relevant official web results)"
-    elif web_passages and not provider.startswith("Groq + official web search"):
-        provider += " with official web search sources"
+        provider += " (no relevant public web results)"
+    elif web_passages and not provider.startswith("Groq + public web search"):
+        provider += " with public web sources"
     return answer, passages, provider
