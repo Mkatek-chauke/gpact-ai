@@ -72,7 +72,10 @@ def groq_answer(question, history, passages):
     messages.extend([
         {"role": "user", "content": f"Authorized source excerpts:\n{context}\n\nQuestion: {question}"},
     ])
-    client = Groq(api_key=api_key)
+    base_url = os.getenv("GROQ_BASE_URL", "").rstrip("/")
+    if base_url.endswith("/openai/v1"):
+        base_url = base_url[:-len("/openai/v1")]
+    client = Groq(api_key=api_key, **({"base_url": base_url} if base_url else {}))
     completion = client.chat.completions.create(
         model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
         messages=messages,

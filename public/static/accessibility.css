@@ -1,0 +1,253 @@
+:root {
+  font-size: 16px;
+}
+
+body,
+button,
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+.brand-mark {
+  width: 42px;
+  height: 42px;
+  font-size: 25px;
+}
+
+.brand strong {
+  font-size: 19px;
+}
+
+.brand small,
+.side-label,
+.modal-kicker {
+  font-size: 11px;
+}
+
+.sidebar {
+  width: 270px;
+}
+
+.main {
+  margin-left: 270px;
+  width: calc(100% - 270px);
+}
+
+.nav-item {
+  min-height: 44px;
+  font-size: 15px;
+}
+
+.repo-item,
+.user-summary strong,
+.safety-card strong {
+  font-size: 13px;
+}
+
+.safety-card p,
+.user-summary small {
+  font-size: 12px;
+}
+
+.topbar {
+  min-height: 64px;
+}
+
+.breadcrumb,
+.privacy-note,
+.library-sub {
+  font-size: 14px;
+}
+
+.icon-button {
+  width: 36px;
+  height: 36px;
+  font-size: 18px;
+}
+
+.welcome {
+  width: min(100%, 760px);
+}
+
+.eyebrow,
+.suggestion-label {
+  font-size: 12px;
+}
+
+.welcome > p {
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.trust-pills span,
+.suggestion small,
+.input-hint,
+.answer-footer,
+.assistant-head small,
+.cite-details small,
+.document-card small,
+.demo-note {
+  font-size: 12px;
+}
+
+.suggestion strong,
+.assistant-head strong,
+.cite-details strong,
+.document-card strong {
+  font-size: 14px;
+}
+
+.suggestion {
+  min-height: 92px;
+  padding: 16px;
+}
+
+.suggestion-icon {
+  width: 34px;
+  height: 34px;
+  font-size: 17px;
+}
+
+.suggestion-arrow {
+  font-size: 15px;
+}
+
+.composer-wrap,
+.conversation,
+.library {
+  width: min(100%, 760px);
+}
+
+.composer {
+  padding: 16px;
+}
+
+.composer textarea,
+.user-bubble,
+.answer-text {
+  font-size: 16px;
+}
+
+.composer textarea {
+  min-height: 32px;
+}
+
+.composer-disclaimer,
+.citation-panel h3,
+.cite-ref,
+.status-pill,
+.warning,
+.typing,
+.form-grid label,
+.field-label,
+.modal-copy,
+.tab,
+.file-drop strong,
+.file-drop small,
+.file-name,
+.modal-error,
+.primary-button,
+.form-grid input,
+.form-grid select,
+.field-label input {
+  font-size: 13px;
+}
+
+.send-button {
+  width: 42px;
+  height: 42px;
+}
+
+.answer-text {
+  line-height: 1.8;
+}
+
+.citation-panel {
+  padding: 16px;
+}
+
+.cite-ref {
+  padding: 5px 8px;
+}
+
+.library h2 {
+  font-size: 30px;
+}
+
+.document-card {
+  padding: 18px 14px;
+}
+
+.primary-button {
+  min-height: 44px;
+  padding: 11px 16px;
+}
+
+.modal {
+  width: min(100%, 640px);
+  padding: 28px;
+}
+
+.modal h2 {
+  font-size: 25px;
+}
+
+.form-grid input,
+.form-grid select,
+.field-label input {
+  height: 42px;
+}
+
+.file-drop {
+  min-height: 130px;
+}
+
+.toast {
+  font-size: 14px;
+}
+
+@media (max-width: 850px) {
+  .sidebar {
+    width: 220px;
+  }
+
+  .main {
+    margin-left: 220px;
+    width: calc(100% - 220px);
+  }
+
+  .main-scroll {
+    padding-right: 22px;
+    padding-left: 22px;
+  }
+}
+
+@media (max-width: 600px) {
+  .sidebar {
+    width: 56px;
+  }
+
+  .main {
+    margin-left: 56px;
+    width: calc(100% - 56px);
+  }
+
+  .topbar {
+    min-height: 54px;
+  }
+
+  .welcome h1 {
+    font-size: 36px;
+  }
+
+  .suggestion {
+    min-height: 76px;
+    padding: 12px;
+  }
+
+  .modal {
+    padding: 18px;
+  }
+}

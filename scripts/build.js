@@ -13,6 +13,7 @@ const requiredFiles = [
   "templates/index.html",
   "public/static/app.js",
   "public/static/styles.css",
+  "public/static/accessibility.css",
   "data/documents.json",
 ];
 
@@ -29,12 +30,14 @@ if (!Array.isArray(corpus) || corpus.length === 0) {
   process.exit(1);
 }
 
-const js = spawnSync(process.execPath, ["--check", path.join(root, "public/static/app.js")], {
-  encoding: "utf8",
-});
-if (js.status !== 0) {
-  process.stderr.write(js.stderr);
-  process.exit(js.status || 1);
+for (const file of ["public/static/app.js"]) {
+  const check = spawnSync(process.execPath, ["--check", path.join(root, file)], {
+    encoding: "utf8",
+  });
+  if (check.status !== 0) {
+    process.stderr.write(check.stderr);
+    process.exit(check.status || 1);
+  }
 }
 
 console.log(`Build checks passed; ${corpus.length} bootstrap documents are available.`);

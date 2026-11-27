@@ -10,10 +10,11 @@ A runnable demonstration of a source-grounded government policy assistant. It in
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+$env:LOCAL_JSON_STORE = "1"
 python app.py
 ```
 
-Open [http://127.0.0.1:5000](http://127.0.0.1:5000). Without `DATABASE_URL`, the app uses the local JSON corpus and extractive answers.
+Open [http://127.0.0.1:5000](http://127.0.0.1:5000). `LOCAL_JSON_STORE=1` forces the local JSON corpus and extractive answers even if a database URL is present in `.env`.
 
 ## Use Neon Postgres as the document store
 
@@ -53,6 +54,9 @@ These are not required for Neon Postgres or for the local extractive-answer mode
 - Obvious email, phone-number, and national-ID patterns are rejected from ingested content and kept out of Groq prompts; conversation history is not sent to Groq.
 - The ingestion dialog includes a `gov.za` importer for public Acts, Bills, draft bills, notices, papers, reports, comments and other public documents.
 - Gov.za imports are restricted to the `gov.za`/`www.gov.za` hosts, HTTPS, public classification, 15 MB PDFs, one to five documents per request, and readable PDF text.
+- The ingestion dialog can also load the current national-department website directory from gov.za and import up to two policy-related PDFs from one selected department per run. It stays on the directory-listed HTTPS host, checks robots.txt, and marks publication currency as `Unverified`; check the original source before relying on it.
+- Citations for imported public PDFs open the original PDF, with the department page retained as additional source context. Scanned/image-only PDFs need OCR tooling to be configured; otherwise they cannot be indexed as text.
+- Chat searches the indexed corpus, not every government website in real time. To use newly published material, import it from gov.za or a listed department first. The department importer is deliberately bounded to one policy-related page and two PDFs per request; it is not an exhaustive crawler or a guarantee that every document is current.
 - No question history is persisted, and source/query content is not written to application logs.
 
 The local JSON store is intended for demonstration, not multi-user production. Configure authentication, encryption, retention, audit controls, repository connectors, and deployment-specific policy before operational use.

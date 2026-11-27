@@ -3,12 +3,14 @@ import tempfile
 import unittest
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import app as application
+import integrations
 import rag
 import govza
 import storage
+import psycopg
 
 
 class AssistantApiTests(unittest.TestCase):
@@ -145,6 +147,84 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(date, "01 Apr 2026")
         self.assertEqual(pdf_links, ["https://www.gov.za/sites/default/files/gcis_document/202604/public-administration.pdf"])
 
+    def test_department_directory_parser_uses_official_government_hosts_only(self):
+        directory_html = '''
+        <a href="https://www.education.gov.za/">Basic Education</a>
+        <a href="https://www.gov.za/about-government/contact-directory">Minister</a>
+        <a href="https://example.com/policy">Unverified external site</a>
+        '''
+        with patch.object(govza, "fetch_text", return_value=directory_html):
+            departments = govza.list_national_departments()
+        self.assertEqual(departments, [{
+            "name": "Basic Education",
+            "url": "https://www.education.gov.za/",
+        }])
+
+    def test_department_directory_api_returns_official_site_options(self):
+        expected = [{"name": "Basic Education", "url": "https://www.education.gov.za/"}]
+        with patch.object(application, "list_national_departments", return_value=expected):
+            response = self.client.get("/api/govza/departments")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["departments"], expected)
+
+    def test_department_import_only_accepts_directory_sites_and_policy_pdfs(self):
+        home_page = '''
+        <a href="/policies">Policies</a>
+        <a href="/files/policy-framework.pdf">Policy framework</a>
+        <a href="/files/annual-report.pdf">Annual report</a>
+        '''
+        policies_page = '<a href="/files/policy-manual.pdf">Download</a>'
+        approved = [{"name": "Basic Education", "url": "https://www.education.gov.za/"}]
+        with patch.object(govza, "list_national_departments", return_value=approved), patch.object(
+            govza, "_validate_official_host_url", side_effect=govza.urlparse
+        ) as validate_url, patch.object(govza, "_robots_parser", return_value=object()), patch.object(
+            govza, "_fetch_official_page", side_effect=[home_page, policies_page]
+        ), patch.object(govza, "_fetch_official_pdf", return_value=b"%PDF sample"):
+            imported = govza.import_department_site("https://www.education.gov.za/", limit=5)
+        self.assertEqual(len(imported), 2)
+        self.assertEqual(
+            {item["source_url"] for item in imported},
+            {
+                "https://www.education.gov.za/files/policy-framework.pdf",
+                "https://www.education.gov.za/files/policy-manual.pdf",
+            },
+        )
+        self.assertTrue(validate_url.called)
+
+        with patch.object(govza, "list_national_departments", return_value=approved):
+            with self.assertRaisesRegex(ValueError, "official gov.za directory"):
+                govza.import_department_site("https://example.com/")
+
+    def test_unverified_department_sources_are_warned_about(self):
+        documents = application.load_documents()
+        documents.append({
+            "id": "unverified-policy",
+            "title": "Department Records Appraisal Policy",
+            "section": "Full document",
+            "version": "Website copy",
+            "status": "Unverified",
+            "classification": "Public",
+            "clearance_rank": 0,
+            "owner": "Basic Education",
+            "date": "2025-01-01",
+            "repository": "Policy Library",
+            "document_type": "Department policy/governance PDF",
+            "source_url": "https://www.education.gov.za/files/policy.pdf",
+            "page_url": "https://www.education.gov.za/policies",
+            "text": "Records must undergo a records appraisal before destruction.",
+        })
+        application.save_documents(documents)
+        response = self.client.post(
+            "/api/chat",
+            json={"question": "What does the department policy say about records appraisal before destruction?"},
+        )
+        result = response.get_json()
+        self.assertTrue(any("could not be verified" in warning for warning in result["warnings"]))
+        self.assertTrue(any(citation["status"] == "Unverified" for citation in result["citations"]))
+        citation = next(item for item in result["citations"] if item["status"] == "Unverified")
+        self.assertEqual(citation["source_url"], "https://www.education.gov.za/files/policy.pdf")
+        self.assertEqual(citation["page_url"], "https://www.education.gov.za/policies")
+
     def test_postgres_connection_is_optional_and_reads_neon_env(self):
         self.database_url_patch.stop()
         try:
@@ -159,8 +239,29 @@ class AssistantApiTests(unittest.TestCase):
                 self.assertEqual(storage.database_url(), "postgresql://pooled.example/db")
             with patch.dict(os.environ, {"NEON_DATABASE_URL": "postgresql://neon.example/db"}, clear=True):
                 self.assertEqual(storage.database_url(), "postgresql://neon.example/db")
+            with patch.dict(os.environ, {
+                "LOCAL_JSON_STORE": "1",
+                "DATABASE_URL_POOLED": "postgresql://pooled.example/db",
+            }, clear=True):
+                self.assertIsNone(storage.database_url())
         finally:
             self.database_url_patch.start()
+
+    def test_postgres_document_saves_use_cursor_batch_execution(self):
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        cursor = MagicMock()
+        connection.cursor.return_value.__enter__.return_value = cursor
+        document = {
+            "id": "sample",
+            "title": "Sample policy",
+            "classification": "Public",
+            "status": "Current",
+            "text": "Sample content",
+        }
+        with patch.object(storage, "_connect", return_value=connection):
+            storage.save_documents([document])
+        cursor.executemany.assert_called_once()
 
     def test_vercel_ingestion_requires_persistent_database(self):
         with patch.dict(os.environ, {"VERCEL": "1"}, clear=False), patch.object(storage, "database_url", return_value=None):
@@ -168,16 +269,30 @@ class AssistantApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertIn("DATABASE_URL", response.get_json()["error"])
 
+    def test_database_errors_return_clear_json_without_details(self):
+        with patch.object(storage, "database_url", return_value="postgresql://db.invalid"), patch.object(
+            storage,
+            "load_documents",
+            side_effect=psycopg.OperationalError("sensitive connection detail"),
+        ):
+            response = self.client.get("/api/documents")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("DATABASE_URL_POOLED", response.get_json()["error"])
+        self.assertNotIn("sensitive connection detail", response.get_data(as_text=True))
+
     def test_public_assets_are_served_from_vercel_public_directory(self):
         script = self.client.get("/static/app.js")
         stylesheet = self.client.get("/static/styles.css")
+        accessibility = self.client.get("/static/accessibility.css")
         try:
             self.assertEqual(script.status_code, 200)
             self.assertIn(b"function ask", script.data)
             self.assertEqual(stylesheet.status_code, 200)
+            self.assertEqual(accessibility.status_code, 200)
         finally:
             script.close()
             stylesheet.close()
+            accessibility.close()
 
     def test_text_upload_is_indexed_with_metadata(self):
         response = self.client.post(
@@ -240,6 +355,26 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(personal["provider"], "Local extractive retrieval")
             self.assertTrue(personal["citations"])
             groq.assert_not_called()
+
+    def test_groq_base_url_removes_sdk_managed_openai_path(self):
+        passage = {
+            "ref": "C1",
+            "title": "Sample policy",
+            "section": "Section 1",
+            "version": "1.0",
+            "status": "Current",
+            "text": "Records must be reviewed annually.",
+        }
+        with patch.dict(os.environ, {
+            "GROQ_API_KEY": "test-key",
+            "GROQ_BASE_URL": "https://api.groq.com/openai/v1/",
+        }), patch("groq.Groq") as groq_client:
+            groq_client.return_value.chat.completions.create.return_value.choices = [
+                MagicMock(message=MagicMock(content="Records must be reviewed annually. [C1]"))
+            ]
+            answer = integrations.groq_answer("What is required?", [], [passage])
+        self.assertIn("[C1]", answer)
+        groq_client.assert_called_once_with(api_key="test-key", base_url="https://api.groq.com")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#102c49">
   <title>GPACT AI — Policy Assistant</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='accessibility.css') }}">
 </head>
 <body>
   <div class="app-shell">
@@ -66,7 +67,7 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="modal-head"><div><span class="modal-kicker">KNOWLEDGE LIBRARY</span><h2 id="modalTitle">Add a source document</h2></div><button class="icon-button close-modal" aria-label="Close">×</button></div>
       <p class="modal-copy">Index an approved, non-sensitive document or public web page. Only upload content you are authorised to share.</p>
-      <div class="ingest-tabs"><button class="tab active" data-tab="file">Upload document</button><button class="tab" data-tab="url">Import public web page</button><button class="tab" data-tab="govza">Import gov.za</button></div>
+      <div class="ingest-tabs"><button class="tab active" data-tab="file">Upload document</button><button class="tab" data-tab="url">Import public web page</button><button class="tab" data-tab="govza">Import gov.za</button><button class="tab" data-tab="department">Department PDFs</button></div>
       <form id="fileForm">
         <label class="file-drop" for="fileInput"><span class="upload-mark">↑</span><strong>Choose a document to upload</strong><small>PDF, Word, TXT or Markdown · up to 15 MB</small><input type="file" id="fileInput" name="file" accept=".pdf,.docx,.txt,.md" required><span id="fileName" class="file-name"></span></label>
         <div class="form-grid">
@@ -101,6 +102,14 @@
           <label>Maximum documents<select name="limit"><option value="3">3 documents</option><option value="5">5 documents</option></select></label>
         </div>
         <div class="modal-error" id="govzaError"></div><button class="primary-button modal-submit" type="submit">Import gov.za PDFs <span>→</span></button>
+      </form>
+      <form id="departmentForm" class="hidden">
+        <p class="modal-copy">Choose a national department listed on the official gov.za directory. This imports up to two policy-related PDFs from that site, checks its robots.txt, and keeps citations linked to the PDF and page. Chat answers only use documents you have indexed; refresh departments separately as needed. Publication currency is marked unverified.</p>
+        <div class="form-grid">
+          <label>National department website<select id="departmentUrl" name="url" required></select></label>
+          <label>Maximum PDFs<select name="limit"><option value="2">2 documents</option></select></label>
+        </div>
+        <div class="modal-error" id="departmentError"></div><button class="primary-button modal-submit" type="submit">Import department PDFs <span>→</span></button>
       </form>
       <div class="demo-note">Demo access settings are not authentication. Never ingest classified, confidential, or personal information in this demo.</div>
     </div>

@@ -83,6 +83,8 @@ def rank_passages(question, documents, clearance):
                     "date": document["date"],
                     "repository": document["repository"],
                     "document_type": document.get("document_type", "Document"),
+                    "source_url": document.get("source_url"),
+                    "page_url": document.get("page_url"),
                     "score": score,
                 })
     passages.sort(key=lambda item: (

@@ -3,6 +3,8 @@ import os
 
 
 def database_url():
+    if os.getenv("LOCAL_JSON_STORE", "").strip().lower() in {"1", "true", "yes"}:
+        return None
     return (
         os.getenv("DATABASE_URL_POOLED")
         or os.getenv("DATABASE_URL")
@@ -61,8 +63,9 @@ def save_documents(documents):
             )
             """
         )
-        connection.executemany(
-            """
+        with connection.cursor() as cursor:
+            cursor.executemany(
+                """
             INSERT INTO government_documents (id, title, classification, status, data, updated_at)
             VALUES (%(id)s, %(title)s, %(classification)s, %(status)s, %(data)s::jsonb, now())
             ON CONFLICT (id) DO UPDATE SET
@@ -71,15 +74,15 @@ def save_documents(documents):
                 status = EXCLUDED.status,
                 data = EXCLUDED.data,
                 updated_at = now()
-            """,
-            [
-                {
-                    "id": document["id"],
-                    "title": document["title"],
-                    "classification": document["classification"],
-                    "status": document["status"],
-                    "data": json.dumps(document, ensure_ascii=False),
-                }
-                for document in documents
-            ],
-        )
+                """,
+                [
+                    {
+                        "id": document["id"],
+                        "title": document["title"],
+                        "classification": document["classification"],
+                        "status": document["status"],
+                        "data": json.dumps(document, ensure_ascii=False),
+                    }
+                    for document in documents
+                ],
+            )

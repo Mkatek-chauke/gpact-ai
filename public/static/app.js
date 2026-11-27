@@ -18,6 +18,19 @@ function escapeHtml(value) {
   })[char]);
 }
 
+async function readJson(response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    if (!response.ok) {
+      throw new Error(`The server returned an error (${response.status}). Check Vercel function logs and DATABASE_URL_POOLED.`);
+    }
+    throw new Error("The server returned an unexpected response instead of JSON.");
+  }
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || `Request failed (${response.status}).`);
+  return result;
+}
+
 function showToast(message) {
   const toast = $("#toast");
   toast.textContent = message;
@@ -46,8 +59,7 @@ function statusClass(status) {
 
 async function loadDocuments() {
   const response = await fetch("/api/documents", { headers: headers() });
-  if (!response.ok) throw new Error("Could not load the document library.");
-  const data = await response.json();
+  const data = await readJson(response);
   renderRepositories(data.documents);
   $("#documentList").innerHTML = data.documents.map((doc) => `
     <a class="document-card" href="/api/source/${encodeURIComponent(doc.id)}" target="_blank" rel="noopener">
@@ -72,9 +84,9 @@ function renderAnswer(result) {
   const citations = result.citations.length ? `
     <div class="citation-panel"><h3>SOURCE DOCUMENTS · ${result.citations.length}</h3>
       ${result.citations.map((citation) => `
-        <a class="citation" id="citation-${escapeHtml(citation.ref)}" href="/api/source/${encodeURIComponent(citation.document_id)}" target="_blank" rel="noopener">
+        <a class="citation" id="citation-${escapeHtml(citation.ref)}" href="${escapeHtml(citation.source_url && citation.source_url.startsWith("https://") ? citation.source_url : `/api/source/${encodeURIComponent(citation.document_id)}`)}" target="_blank" rel="noopener">
           <span class="cite-ref">${escapeHtml(citation.ref)}</span><span class="cite-details"><strong>${escapeHtml(citation.title)}</strong>
-          <small>${escapeHtml(citation.section)} · v${escapeHtml(citation.version)} · ${escapeHtml(citation.status)} · ${escapeHtml(citation.repository)}</small></span>
+          <small>${escapeHtml(citation.section)} · v${escapeHtml(citation.version)} · ${escapeHtml(citation.status)} · ${escapeHtml(citation.repository)}${citation.page_url ? ` · Source page: ${escapeHtml(citation.page_url)}` : ""}</small></span>
         </a>`).join("")}
     </div>` : "";
   message.innerHTML = `<div class="assistant-head"><span class="assistant-mark">G</span><strong>GPACT Assistant</strong><small>· ${escapeHtml(result.provider)}</small></div>
@@ -101,8 +113,7 @@ async function ask(question) {
       headers: headers(true),
       body: JSON.stringify({ question, history: state.history }),
     });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "The question could not be answered.");
+    const result = await readJson(response);
     pending.remove();
     renderAnswer(result);
     state.history.push({ role: "user", content: question }, { role: "assistant", content: result.answer });
@@ -170,12 +181,13 @@ document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click",
   $("#fileForm").classList.toggle("hidden", tab.dataset.tab !== "file");
   $("#urlForm").classList.toggle("hidden", tab.dataset.tab !== "url");
   $("#govzaForm").classList.toggle("hidden", tab.dataset.tab !== "govza");
+  $("#departmentForm").classList.toggle("hidden", tab.dataset.tab !== "department");
+  if (tab.dataset.tab === "department") loadNationalDepartments();
 }));
 async function loadGovzaCategories() {
   try {
     const response = await fetch("/api/govza/categories", { headers: headers() });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Could not load gov.za categories.");
+    const data = await readJson(response);
     $("#govzaCategory").innerHTML = data.categories.map((category) =>
       `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`
     ).join("");
@@ -184,6 +196,26 @@ async function loadGovzaCategories() {
   }
 }
 loadGovzaCategories();
+let departmentListLoaded = false;
+async function loadNationalDepartments() {
+  if (departmentListLoaded) return;
+  const selector = $("#departmentUrl");
+  const error = $("#departmentError");
+  error.textContent = "";
+  selector.innerHTML = '<option value="">Loading official directory…</option>';
+  try {
+    const response = await fetch("/api/govza/departments", { headers: headers() });
+    const data = await readJson(response);
+    selector.innerHTML = data.departments.map((department) =>
+      `<option value="${escapeHtml(department.url)}">${escapeHtml(department.name)} — ${escapeHtml(new URL(department.url).hostname)}</option>`
+    ).join("");
+    if (!data.departments.length) throw new Error("No national department websites were found in the official directory.");
+    departmentListLoaded = true;
+  } catch (error) {
+    selector.innerHTML = '<option value="">Department directory unavailable</option>';
+    error.message && ($("#departmentError").textContent = error.message);
+  }
+}
 $("#fileInput").addEventListener("change", (event) => {
   $("#fileName").textContent = event.target.files[0]?.name || "";
 });
@@ -196,8 +228,7 @@ async function submitIngestion(event, endpoint, errorSelector, formData = false)
   const body = formData ? new FormData(form) : JSON.stringify(Object.fromEntries(new FormData(form)));
   try {
     const response = await fetch(endpoint, { method: "POST", headers: formData ? headers() : headers(true), body });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Ingestion failed.");
+    const result = await readJson(response);
     closeModals();
     form.reset();
     $("#fileName").textContent = "";
@@ -211,6 +242,7 @@ async function submitIngestion(event, endpoint, errorSelector, formData = false)
 $("#fileForm").addEventListener("submit", (event) => submitIngestion(event, "/api/ingest", "#fileError", true));
 $("#urlForm").addEventListener("submit", (event) => submitIngestion(event, "/api/ingest-url", "#urlError"));
 $("#govzaForm").addEventListener("submit", (event) => submitIngestion(event, "/api/ingest-govza", "#govzaError"));
+$("#departmentForm").addEventListener("submit", (event) => submitIngestion(event, "/api/ingest-department", "#departmentError"));
 $("#saveSettings").addEventListener("click", async () => {
   state.role = $("#roleSelect").value;
   state.clearance = $("#clearanceSelect").value;

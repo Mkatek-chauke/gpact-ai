@@ -14,13 +14,19 @@ from urllib.error import URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.parse import urlparse
 
+import psycopg
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
 from integrations import save_chunks_to_neo4j
 from rag import PERSONAL_DATA_RE, answer_question, make_chunks
-from govza import CATEGORIES as GOVZA_CATEGORIES, import_category
+from govza import (
+    CATEGORIES as GOVZA_CATEGORIES,
+    import_category,
+    import_department_site,
+    list_national_departments,
+)
 import storage
 
 ROOT = Path(__file__).resolve().parent
@@ -34,6 +40,16 @@ app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 lock = threading.Lock()
+
+
+@app.errorhandler(psycopg.Error)
+def handle_database_error(error):
+    logger.error("Postgres request failed (%s)", type(error).__name__)
+    if request.path.startswith("/api/"):
+        return jsonify({
+            "error": "The database is unavailable. Check DATABASE_URL_POOLED in the Vercel project settings."
+        }), 503
+    return "Database unavailable. Check the configured Postgres connection.", 503
 
 
 @app.before_request
@@ -57,7 +73,7 @@ ROLE_MAX_CLEARANCE = {
     "Records Officer": "Internal",
     "Administrator": "Secret",
 }
-STATUSES = {"Current", "Superseded", "Draft"}
+STATUSES = {"Current", "Superseded", "Draft", "Unverified"}
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 
 
@@ -165,7 +181,7 @@ def document_metadata(values, document_id, title):
     if classification not in CLEARANCES:
         raise ValueError("Classification must be Public, Internal, Confidential, or Secret.")
     if status not in STATUSES:
-        raise ValueError("Status must be Current, Superseded, or Draft.")
+        raise ValueError("Status must be Current, Superseded, Draft, or Unverified.")
     version = safe_text(values.get("version", "1.0"), "Version", 40)
     repository = safe_text(values.get("repository", "Department Intranet (simulated)"), "Repository", 100)
     if repository not in {"Policy Library", "Government Gazette", "Department Intranet (simulated)"}:
@@ -275,6 +291,8 @@ def chat():
             "classification": item["classification"],
             "repository": item["repository"],
             "date": item["date"],
+            "source_url": item.get("source_url"),
+            "page_url": item.get("page_url"),
         }
         citations.append(citation)
         if item["status"] == "Superseded":
@@ -285,6 +303,11 @@ def chat():
             )
         elif item["status"] == "Draft":
             warnings.append(f'{item["title"]} version {item["version"]} is a draft and is not approved.')
+        elif item["status"] == "Unverified":
+            warnings.append(
+                f'{item["title"]} was found on an official department website, '
+                "but its current publication status could not be verified."
+            )
     return jsonify({
         "answer": answer,
         "citations": citations,
@@ -373,6 +396,73 @@ def ingest_url():
 @app.get("/api/govza/categories")
 def govza_categories():
     return jsonify({"categories": sorted(GOVZA_CATEGORIES)})
+
+
+@app.get("/api/govza/departments")
+def govza_departments():
+    try:
+        return jsonify({"departments": list_national_departments()})
+    except (ValueError, RuntimeError) as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.post("/api/ingest-department")
+def ingest_department():
+    payload = request.get_json(silent=True) or {}
+    site_url = str(payload.get("url", "")).strip()
+    try:
+        limit = min(max(int(payload.get("limit", 2)), 1), 2)
+    except (TypeError, ValueError):
+        return jsonify({"error": "The document limit must be a number."}), 400
+    try:
+        imports = import_department_site(site_url, limit)
+        if not imports:
+            return jsonify({
+                "error": "No policy-related PDFs were found on the selected site within the safe import limit."
+            }), 404
+        documents = load_documents()
+        added = []
+        for imported in imports:
+            try:
+                from govza import extract_pdf_text
+                text = extract_pdf_text(imported["pdf"])
+            except Exception as exc:
+                logger.warning("Department PDF text extraction skipped: %s", exc)
+                continue
+            if not text or len(text) > 1_000_000 or PERSONAL_DATA_RE.search(text):
+                continue
+            document = {
+                "id": uuid.uuid4().hex,
+                "title": safe_text(imported["title"], "Document title", 200),
+                "section": "Full document",
+                "version": "Website copy",
+                "status": "Unverified",
+                "classification": "Public",
+                "clearance_rank": 0,
+                "owner": safe_text(imported["owner"], "Department", 120),
+                "date": date.today().isoformat(),
+                "repository": "Policy Library",
+                "document_type": "Department policy/governance PDF",
+                "source_url": imported["source_url"],
+                "page_url": imported["page_url"],
+                "text": text,
+            }
+            documents.append(document)
+            added.append({key: value for key, value in document.items() if key != "text"})
+        if not added:
+            return jsonify({
+                "error": "The PDFs had no usable text or contained likely personal information."
+            }), 422
+        save_documents(documents)
+        return jsonify({
+            "message": f"Indexed {len(added)} public PDFs. Their publication currency is unverified.",
+            "documents": added,
+        }), 201
+    except (ValueError, RuntimeError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception:
+        logger.exception("Department website import failed")
+        return jsonify({"error": "The department website could not be imported."}), 500
 
 
 @app.post("/api/ingest-govza")
