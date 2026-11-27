@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import MagicMock, patch
 
 import app as application
@@ -23,7 +24,11 @@ class AssistantApiTests(unittest.TestCase):
         self.data_file_patch.start()
         self.database_url_patch = patch.object(storage, "database_url", return_value=None)
         self.database_url_patch.start()
-        self.groq_key_patch = patch.dict(os.environ, {"GROQ_API_KEY": ""}, clear=False)
+        self.groq_key_patch = patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "", "GROQ_WEB_SEARCH_ENABLED": "0"},
+            clear=False,
+        )
         self.groq_key_patch.start()
         self.demo_auth_patch = patch.object(application, "demo_auth_enabled", return_value=True)
         self.demo_auth_patch.start()
@@ -42,6 +47,130 @@ class AssistantApiTests(unittest.TestCase):
     def set_demo_role(self, role):
         response = self.client.post("/api/demo-role", json={"role": role})
         self.assertEqual(response.status_code, 200)
+
+    def test_forgot_password_emails_one_time_link_without_returning_token(self):
+        account = {
+            "id": "test-account",
+            "name": "Test Citizen",
+            "email": "citizen@example.test",
+            "password_hash": "old-hash",
+            "role": "Citizen",
+        }
+        accounts = [account]
+        environment = {
+            "RESEND_API_KEY": "test-key",
+            "RESEND_FROM_EMAIL": "GPACT <reset@example.test>",
+            "PUBLIC_BASE_URL": "https://gpact.example",
+        }
+        with patch.dict(os.environ, environment, clear=False), patch.object(
+            application,
+            "LOCAL_RESET_TOKENS",
+            {},
+        ) as reset_tokens, patch.object(
+            application,
+            "load_local_accounts",
+            return_value=accounts,
+        ), patch.object(application, "save_local_account") as save_account, patch.object(
+            application,
+            "send_password_reset_email",
+        ) as send_email:
+            response = self.client.post(
+                "/api/auth/forgot",
+                json={"email": "citizen@example.test"},
+            )
+            result = response.get_json()
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn("reset_token", result)
+            self.assertIn("If an account exists", result["message"])
+            send_email.assert_called_once()
+
+            reset_url = send_email.call_args.args[1]
+            token = parse_qs(urlparse(reset_url).query)["token"][0]
+            self.assertTrue(reset_url.startswith("https://gpact.example/auth/account?"))
+            reset_page = self.client.get(f"/auth/account?token={token}")
+            self.assertEqual(reset_page.status_code, 200)
+            self.assertIn(f'const initialResetToken = "{token}";', reset_page.get_data(as_text=True))
+            reset = self.client.post(
+                "/api/auth/reset",
+                json={"token": token, "password": "new-secure-password"},
+            )
+            self.assertEqual(reset.status_code, 200)
+            self.assertEqual(reset.get_json()["redirect"], "/auth/account")
+            save_account.assert_called_once()
+            self.assertNotEqual(account["password_hash"], "old-hash")
+            self.assertEqual(reset_tokens, {})
+
+    def test_forgot_password_does_not_send_for_unknown_account(self):
+        with patch.dict(
+            os.environ,
+            {
+                "RESEND_API_KEY": "test-key",
+                "RESEND_FROM_EMAIL": "GPACT <reset@example.test>",
+                "PUBLIC_BASE_URL": "https://gpact.example",
+            },
+            clear=False,
+        ), patch.object(application, "load_local_accounts", return_value=[]), patch.object(
+            application,
+            "send_password_reset_email",
+        ) as send_email:
+            response = self.client.post(
+                "/api/auth/forgot",
+                json={"email": "unknown@example.test"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("If an account exists", response.get_json()["message"])
+        send_email.assert_not_called()
+
+    def test_forgot_password_reports_missing_resend_configuration(self):
+        with patch.dict(
+            os.environ,
+            {
+                "RESEND_API_KEY": "",
+                "RESEND_FROM_EMAIL": "",
+                "PUBLIC_BASE_URL": "",
+            },
+            clear=False,
+        ), patch.object(
+            application,
+            "send_password_reset_email",
+        ) as send_email:
+            response = self.client.post(
+                "/api/auth/forgot",
+                json={"email": "citizen@example.test"},
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("not configured", response.get_json()["error"])
+        send_email.assert_not_called()
+
+    def test_forgot_password_reports_email_delivery_failure(self):
+        account = {"email": "citizen@example.test"}
+        with patch.dict(
+            os.environ,
+            {
+                "RESEND_API_KEY": "test-key",
+                "RESEND_FROM_EMAIL": "GPACT <reset@example.test>",
+                "PUBLIC_BASE_URL": "https://gpact.example",
+            },
+            clear=False,
+        ), patch.object(application, "LOCAL_RESET_TOKENS", {}) as reset_tokens, patch.object(
+            application,
+            "load_local_accounts",
+            return_value=[account],
+        ), patch.object(
+            application,
+            "send_password_reset_email",
+            side_effect=application.EmailDeliveryError("Resend returned HTTP 403."),
+        ):
+            response = self.client.post(
+                "/api/auth/forgot",
+                json={"email": "citizen@example.test"},
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("could not be sent", response.get_json()["error"])
+        self.assertEqual(reset_tokens, {})
 
     def test_signed_in_home_shows_the_dashboard_actions(self):
         response = self.client.get("/")
@@ -227,6 +356,61 @@ class AssistantApiTests(unittest.TestCase):
             "I couldn't find supporting information for that question in the official government sources currently available.",
         )
         fetch.assert_not_called()
+
+    def test_chat_cites_live_official_search_results(self):
+        web_result = {
+            "id": "web-records-guidance",
+            "title": "Official Records Disposal Guidance",
+            "section": "Web page",
+            "version": "Not stated",
+            "status": "Unverified",
+            "classification": "Public",
+            "clearance_rank": 0,
+            "owner": "Official website (www.gov.za)",
+            "date": "",
+            "repository": "Official Government Websites",
+            "document_type": "Web page",
+            "text": (
+                "A department must record written authorisation before disposing of government "
+                "records. The official must retain the disposal record."
+            ),
+            "source_url": "https://www.gov.za/policies/records-disposal",
+            "page_url": "https://www.gov.za/policies/records-disposal",
+            "source_type": "live_web",
+        }
+        with patch.dict(
+            os.environ,
+            {
+                "GROQ_API_KEY": "test-key",
+                "GROQ_WEB_SEARCH_ENABLED": "1",
+            },
+            clear=False,
+        ), patch.object(
+            application,
+            "load_documents",
+            return_value=[],
+        ), patch.object(
+            rag,
+            "groq_web_search",
+            return_value=[web_result],
+        ) as search, patch.object(
+            rag,
+            "groq_answer",
+            return_value="A department must record written authorisation before disposing of government records [C1].",
+        ):
+            response = self.client.post(
+                "/api/chat",
+                json={"question": "What must a department record before disposing records?"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.get_json()
+        self.assertEqual(result["provider"], "Groq + official web search")
+        self.assertEqual(result["citations"][0]["source_type"], "live_web")
+        self.assertEqual(result["citations"][0]["source_url"], web_result["source_url"])
+        self.assertEqual(result["citations"][0]["status"], "Unverified")
+        self.assertTrue(any("publication status could not be verified" in item for item in result["warnings"]))
+        search.assert_called_once_with("What must a department record before disposing records?")
 
     def test_ai_can_return_exact_no_evidence_for_unrelated_retrieved_text(self):
         with patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}), patch.object(
@@ -827,13 +1011,21 @@ class AssistantApiTests(unittest.TestCase):
 
     def test_external_llm_is_skipped_for_internal_content_and_personal_queries(self):
         self.set_demo_role("Officer")
-        with patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}), patch.object(rag, "groq_answer") as groq:
+        with patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "test-key", "GROQ_WEB_SEARCH_ENABLED": "1"},
+            clear=False,
+        ), patch.object(rag, "groq_answer") as groq, patch.object(
+            rag,
+            "groq_web_search",
+        ) as web_search:
             internal = self.client.post(
                 "/api/chat",
                 json={"question": "What oversight is required when using AI?"},
             ).get_json()
-            self.assertEqual(internal["provider"], "Local extractive retrieval")
+            self.assertIn("web search skipped for non-public context", internal["provider"])
             groq.assert_not_called()
+            web_search.assert_not_called()
 
             personal = self.client.post(
                 "/api/chat",
@@ -842,6 +1034,7 @@ class AssistantApiTests(unittest.TestCase):
             self.assertEqual(personal["provider"], "Local privacy safeguard")
             self.assertFalse(personal["citations"])
             groq.assert_not_called()
+            web_search.assert_not_called()
 
     def test_groq_base_url_removes_sdk_managed_openai_path(self):
         passage = {
@@ -867,6 +1060,45 @@ class AssistantApiTests(unittest.TestCase):
         self.assertIn("spelling mistakes", messages[0]["content"])
         self.assertIn("government department", messages[0]["content"])
         self.assertIn('"authorized_source_excerpts"', messages[1]["content"])
+
+    def test_groq_web_search_filters_domains_and_returns_official_page_metadata(self):
+        official_result = MagicMock(
+            title="Official information",
+            url="https://www.gov.za/example",
+            content="Public government source excerpt.",
+        )
+        outside_result = MagicMock(
+            title="Unofficial information",
+            url="https://www.gov.za.example.com/page",
+            content="Not an official domain.",
+        )
+        tool = MagicMock(
+            type="browser_search",
+            search_results=MagicMock(results=[official_result, outside_result]),
+            browser_results=[],
+        )
+        completion = MagicMock()
+        completion.choices[0].message.executed_tools = [tool]
+        with patch.dict(
+            os.environ,
+            {
+                "GROQ_API_KEY": "test-key",
+                "GROQ_BASE_URL": "",
+                "GROQ_SEARCH_DOMAINS": "gov.za,nsfas.org.za",
+            },
+            clear=False,
+        ), patch("groq.Groq") as groq_client:
+            groq_client.return_value.chat.completions.create.return_value = completion
+            results = integrations.groq_web_search("What is the official information?")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["source_url"], official_result.url)
+        self.assertEqual(results[0]["source_type"], "live_web")
+        self.assertEqual(results[0]["status"], "Unverified")
+        request = groq_client.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["tools"], [{"type": "browser_search"}])
+        self.assertEqual(request["search_settings"]["include_domains"], ["gov.za", "nsfas.org.za"])
+        groq_client.assert_called_once_with(api_key="test-key")
 
 
 if __name__ == "__main__":

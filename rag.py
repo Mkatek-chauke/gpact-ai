@@ -3,7 +3,7 @@ import logging
 from collections import Counter
 from difflib import SequenceMatcher
 
-from integrations import groq_answer
+from integrations import groq_answer, groq_web_search
 
 logger = logging.getLogger(__name__)
 WORD_RE = re.compile(r"[a-z0-9][a-z0-9'-]*", re.I)
@@ -173,6 +173,7 @@ def rank_passages(question, documents, clearance):
                     "document_type": document.get("document_type", "Document"),
                     "source_url": document.get("source_url"),
                     "page_url": document.get("page_url"),
+                    "source_type": document.get("source_type", "project_document"),
                     "score": score,
                 })
     passages.sort(key=lambda item: (
@@ -223,9 +224,21 @@ def _document_passages(documents, clearance):
                 "document_type": document.get("document_type", "Document"),
                 "source_url": document.get("source_url"),
                 "page_url": document.get("page_url"),
+                "source_type": document.get("source_type", "project_document"),
                 "score": 1.0,
             })
     selected = passages[:5]
+    for index, item in enumerate(selected, start=1):
+        item["ref"] = f"C{index}"
+    return selected
+
+
+def _combine_passages(local_passages, web_passages):
+    if local_passages and web_passages:
+        selected = local_passages[:3] + web_passages[:2]
+    else:
+        selected = (local_passages or web_passages)[:5]
+    selected = [dict(item) for item in selected]
     for index, item in enumerate(selected, start=1):
         item["ref"] = f"C{index}"
     return selected
@@ -237,7 +250,14 @@ def _all_sentences_cited(answer, passages):
     return bool(sentences) and all(any(ref in sentence for ref in allowed) for sentence in sentences)
 
 
-def answer_question(question, history, documents, clearance, document_context=False):
+def answer_question(
+    question,
+    history,
+    documents,
+    clearance,
+    document_context=False,
+    web_search_enabled=False,
+):
     if PERSONAL_DATA_RE.search(question) or PERSONAL_DATA_REQUEST_RE.search(question):
         return (
             "I can't help retrieve or disclose personal information. Use an authorised, "
@@ -257,9 +277,9 @@ def answer_question(question, history, documents, clearance, document_context=Fa
     is_document_summary = document_context and DOCUMENT_SUMMARY_RE.search(question)
     if is_document_summary:
         passages = _document_passages(documents, clearance)
-    if not passages:
-        return NO_EVIDENCE_ANSWER, [], "Local extractive retrieval"
     if DECISION_REQUEST_RE.search(question):
+        if not passages:
+            return NO_EVIDENCE_ANSWER, [], "Local extractive retrieval"
         prefix = (
             "I can't approve, reject, or make a procurement decision. "
         )
@@ -270,6 +290,33 @@ def answer_question(question, history, documents, clearance, document_context=Fa
                 + _fallback_answer(passages)
             )
         return answer, passages, "Local decision safeguard"
+
+    web_search_attempted = False
+    web_search_failed = False
+    web_search_skipped = False
+    web_passages = []
+    if web_search_enabled and not document_context:
+        if any(item["classification"] != "Public" for item in passages):
+            web_search_skipped = True
+        else:
+            web_search_attempted = True
+            try:
+                web_documents = groq_web_search(retrieval_question)
+                web_passages = rank_passages(retrieval_question, web_documents, 0)
+            except Exception as exc:
+                logger.warning(
+                    "Groq official web search unavailable (%s).",
+                    type(exc).__name__,
+                )
+                web_search_failed = True
+    passages = _combine_passages(passages, web_passages)
+    if not passages:
+        if web_search_failed:
+            return NO_EVIDENCE_ANSWER, [], "Groq web search unavailable"
+        if web_search_attempted:
+            return NO_EVIDENCE_ANSWER, [], "Groq web search (no relevant official results)"
+        return NO_EVIDENCE_ANSWER, [], "Local extractive retrieval"
+
     answer = None
     provider = "Local extractive retrieval"
     safe_for_external_provider = (
@@ -289,7 +336,7 @@ def answer_question(question, history, documents, clearance, document_context=Fa
                 return NO_EVIDENCE_ANSWER, [], "Groq"
             if candidate and _all_sentences_cited(candidate, passages):
                 answer = candidate
-                provider = "Groq"
+                provider = "Groq + official web search" if web_passages else "Groq"
             elif candidate:
                 logger.warning("Groq answer omitted required source citations; using local answer.")
                 provider = "Local extractive retrieval (AI answer rejected)"
@@ -302,4 +349,12 @@ def answer_question(question, history, documents, clearance, document_context=Fa
             answer = None
     if answer is None:
         answer = _fallback_answer(passages)
+    if web_search_failed:
+        provider += " (official web search unavailable)"
+    elif web_search_skipped:
+        provider += " (official web search skipped for non-public context)"
+    elif web_search_attempted and not web_passages:
+        provider += " (no relevant official web results)"
+    elif web_passages and not provider.startswith("Groq + official web search"):
+        provider += " with official web search sources"
     return answer, passages, provider

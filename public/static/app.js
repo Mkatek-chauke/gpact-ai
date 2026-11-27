@@ -11,6 +11,7 @@ const state = {
   sourceFilters: ["all"],
   user: null,
   csrfToken: "",
+  liveSearchEnabled: false,
   busy: false,
   demoAuth: false,
   documentContextId: "",
@@ -163,7 +164,11 @@ function updateSourceTransparency() {
   if (!$("#sourceTransparency")) return;
   const filters = selectedSourceFilters();
   const label = filters.includes("all") ? "all indexed source categories" : `${filters.length} selected indexed ${filters.length === 1 ? "category" : "categories"}`;
-  $("#sourceTransparency").textContent = `Searching ${label} · ${state.documents.length} accessible indexed ${state.documents.length === 1 ? "document" : "documents"}`;
+  const searchWebsite = state.liveSearchEnabled
+    && !state.documentContextId
+    && (filters.includes("all") || filters.includes("department_websites"));
+  const webSources = searchWebsite ? " + official government websites" : "";
+  $("#sourceTransparency").textContent = `Searching ${label}${webSources} · ${state.documents.length} accessible indexed ${state.documents.length === 1 ? "document" : "documents"}`;
 }
 
 function selectSourceFilter(sourceFilter) {
@@ -208,16 +213,16 @@ function renderAnswer(result) {
   message.className = "message";
   const hasEvidence = result.citations.length > 0;
   const citedAnswer = escapeHtml(result.answer).replace(/\[(C\d+)\]/g, '<a href="#citation-$1">$1</a>');
-  const warnings = hasEvidence
-    ? result.warnings.map((warning) => `<div class="warning">⚠ ${escapeHtml(warning)}</div>`).join("")
-    : "";
+  const warnings = result.warnings.map((warning) => `<div class="warning">⚠ ${escapeHtml(warning)}</div>`).join("");
   const citedDocumentIds = new Set(result.citations.map((citation) => citation.document_id));
   const citations = result.citations.length ? `
     <div class="citation-panel"><h3>SOURCES USED · ${result.citations.length}</h3>
       ${result.citations.map((citation) => `
         <a class="citation" id="citation-${escapeHtml(citation.ref)}" href="${escapeHtml(citation.source_url && citation.source_url.startsWith("https://") ? citation.source_url : `/documents/${encodeURIComponent(citation.document_id)}`)}" target="_blank" rel="noopener">
           <span class="cite-ref">${escapeHtml(citation.ref)}</span><span class="cite-details"><strong>${escapeHtml(citation.title)}</strong>
-          <small>${escapeHtml(citation.section)} · v${escapeHtml(citation.version)} · ${escapeHtml(citation.status)} · ${escapeHtml(citation.repository)} · ${escapeHtml(citation.owner || "Department not specified")}${citation.page_url ? ` · Source page: ${escapeHtml(citation.page_url)}` : ""}</small></span>
+          <small>${citation.source_type === "live_web"
+            ? `Official website · ${escapeHtml(citation.owner || "Department not identified")} · ${escapeHtml(citation.status)}`
+            : `${escapeHtml(citation.section)} · v${escapeHtml(citation.version)} · ${escapeHtml(citation.status)} · ${escapeHtml(citation.repository)} · ${escapeHtml(citation.owner || "Department not specified")}${citation.page_url ? ` · Source page: ${escapeHtml(citation.page_url)}` : ""}`}</small></span>
         </a>`).join("")}
     </div>` : "";
   const relatedDocuments = (result.related_documents || []).filter((doc) => !citedDocumentIds.has(doc.id));
@@ -231,10 +236,13 @@ function renderAnswer(result) {
     </div>` : "";
   const confidence = result.confidence_score == null ? "—" : `${result.confidence_score}%`;
   const department = result.relevant_department || "Not identified in the matched source metadata";
+  const departmentLabel = result.citations.some((citation) => citation.source_type === "live_web")
+    ? "Relevant Department / Official Site"
+    : "Relevant Government Department";
   const answerMetadata = hasEvidence ? `
     <div class="answer-metrics">
       <div><small>Confidence Score</small><strong>${confidence}</strong><span>Retrieval match only; not a measure of correctness.</span></div>
-      <div><small>Relevant Government Department</small><strong>${escapeHtml(department)}</strong></div>
+      <div><small>${departmentLabel}</small><strong>${escapeHtml(department)}</strong></div>
     </div>
     ${citations}${related}
     <div class="answer-footer">${escapeHtml(result.disclaimer)}</div>` : "";
@@ -258,7 +266,13 @@ async function ask(question) {
   setView("conversation");
   const pending = document.createElement("div");
   pending.className = "typing";
-  pending.textContent = "Searching authorised sources…";
+  const selectedFilters = selectedSourceFilters();
+  const includesLiveWeb = state.liveSearchEnabled
+    && !state.documentContextId
+    && (selectedFilters.includes("all") || selectedFilters.includes("department_websites"));
+  pending.textContent = includesLiveWeb
+    ? "Searching indexed documents and official government websites…"
+    : "Searching authorised indexed sources…";
   conversation.append(pending);
   conversation.scrollIntoView({ block: "end", behavior: "smooth" });
   try {
@@ -534,6 +548,7 @@ async function bootstrap() {
   state.user = result.user;
   state.csrfToken = result.csrf_token;
   state.demoAuth = result.demo;
+  state.liveSearchEnabled = result.live_search_enabled === true;
   updateUserSummary();
   setView("welcome");
   const savedDocumentContext = sessionStorage.getItem("gpact-document-context");

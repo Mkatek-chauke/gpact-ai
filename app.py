@@ -15,7 +15,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import psycopg
 from dotenv import load_dotenv
@@ -25,7 +25,8 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
 from auth import ROLE_ORDER, demo_auth_enabled, entra_configuration, principal_from_claims, register_entra_oauth
-from integrations import save_chunks_to_neo4j
+from email_service import EmailDeliveryError, resend_is_configured, send_password_reset_email
+from integrations import groq_web_search_enabled, save_chunks_to_neo4j
 from rag import PERSONAL_DATA_RE, PERSONAL_DATA_REQUEST_RE, answer_question, make_chunks
 from govza import (
     CATEGORIES as GOVZA_CATEGORIES,
@@ -445,9 +446,14 @@ def auth_login():
 def auth_account():
     if not demo_auth_enabled():
         return redirect(url_for("auth_login"))
-    if current_principal() is not None:
+    reset_token = request.args.get("token", "").strip()
+    if current_principal() is not None and not reset_token:
         return redirect(url_for("home"))
-    return render_template("auth_account.html", csrf_token=csrf_token())
+    return render_template(
+        "auth_account.html",
+        csrf_token=csrf_token(),
+        reset_token=reset_token,
+    )
 
 
 @app.get("/auth/callback")
@@ -493,6 +499,10 @@ def session_info():
         },
         "csrf_token": csrf_token(),
         "demo": demo_auth_enabled(),
+        "live_search_enabled": (
+            groq_web_search_enabled()
+            and bool(os.getenv("GROQ_API_KEY", "").strip())
+        ),
     })
 
 
@@ -565,22 +575,64 @@ def local_forgot():
         return jsonify({"error": "The request failed CSRF validation. Refresh the page and try again."}), 403
     payload = request.get_json(silent=True) or {}
     email = str(payload.get("email", "")).strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return jsonify({"error": "Enter a valid email address."}), 400
+    if not resend_is_configured():
+        logger.error("Password reset email is unavailable because Resend is not configured.")
+        return jsonify({
+            "error": "Password reset email is not configured. Contact support.",
+        }), 503
+
+    base_url = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    parsed_base_url = urlparse(base_url)
+    if (
+        not parsed_base_url.hostname
+        or parsed_base_url.username
+        or parsed_base_url.password
+        or parsed_base_url.query
+        or parsed_base_url.fragment
+        or parsed_base_url.path not in ("", "/")
+        or (
+            parsed_base_url.scheme not in {"https", "http"}
+            or (
+                parsed_base_url.scheme != "https"
+                and parsed_base_url.hostname not in {"localhost", "127.0.0.1"}
+            )
+        )
+    ):
+        logger.error("Password reset email is unavailable because PUBLIC_BASE_URL is invalid.")
+        return jsonify({
+            "error": "Password reset email is not configured. Contact support.",
+        }), 503
+
     account = next(
         (item for item in load_local_accounts() if item.get("email") == email),
         None,
     )
     if account:
         token = secrets.token_urlsafe(32)
-        LOCAL_RESET_TOKENS[hashlib.sha256(token.encode("utf-8")).hexdigest()] = {
+        token_key = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        LOCAL_RESET_TOKENS[token_key] = {
             "email": email,
             "expires": time.time() + 30 * 60,
         }
-        return jsonify({
-            "message": "A local demo reset token was generated.",
-            "reset_token": token,
-        })
+        reset_url = (
+            f"{base_url}{url_for('auth_account')}?"
+            f"{urlencode({'token': token})}"
+        )
+        try:
+            send_password_reset_email(email, reset_url)
+        except EmailDeliveryError as exc:
+            LOCAL_RESET_TOKENS.pop(token_key, None)
+            logger.error("Password reset email delivery failed: %s", exc)
+            return jsonify({
+                "error": "Password reset email could not be sent. Please try again later.",
+            }), 503
     return jsonify({
-        "message": "If an account exists for this email, reset instructions are available.",
+        "message": (
+            "If an account exists for this email, reset instructions will arrive shortly. "
+            "Check your inbox and spam folder."
+        ),
     })
 
 
@@ -827,12 +879,19 @@ def chat():
         and item.get("role") == "user"
         and isinstance(item.get("content"), str)
     ]
+    should_search_web = (
+        document_id is None
+        and ("all" in source_filters or "department_websites" in source_filters)
+        and groq_web_search_enabled()
+        and bool(os.getenv("GROQ_API_KEY", "").strip())
+    )
     answer, passages, provider = answer_question(
         question,
         history,
         documents,
         clearance,
         document_context=document_id is not None,
+        web_search_enabled=should_search_web,
     )
     audit_event(
         "chat",
@@ -846,10 +905,16 @@ def chat():
             current_versions[key] = document["version"]
     citations = []
     warnings = []
-    if provider == "Local extractive retrieval (AI provider unavailable)":
+    if provider.startswith("Local extractive retrieval (AI provider unavailable"):
         warnings.append("AI answer generation is unavailable; the response was extracted from the cited passages.")
-    elif provider == "Local extractive retrieval (AI answer rejected)":
+    elif provider.startswith("Local extractive retrieval (AI answer rejected"):
         warnings.append("The AI answer failed citation checks; the response was extracted from the cited passages.")
+    if "official web search unavailable" in provider.lower() or provider == "Groq web search unavailable":
+        warnings.append("Live search is unavailable; only indexed project documents could support this response.")
+    elif "no relevant official web results" in provider.lower() or provider == "Groq web search (no relevant official results)":
+        warnings.append("No relevant official website results were found; indexed project documents were searched.")
+    elif "web search skipped for non-public context" in provider.lower():
+        warnings.append("Live search was skipped because matching project sources are not public.")
     for item in passages:
         citation = {
             "ref": item["ref"],
@@ -864,6 +929,7 @@ def chat():
             "date": item["date"],
             "source_url": item.get("source_url"),
             "page_url": item.get("page_url"),
+            "source_type": item.get("source_type", "project_document"),
         }
         citations.append(citation)
         if item["status"] == "Superseded":

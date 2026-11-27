@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
   <title>GPACT AI - Local account</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='accessibility.css') }}">
@@ -33,11 +34,11 @@
 
     <form id="forgotForm" class="form-grid hidden" style="grid-template-columns: 1fr;">
       <label>Email<input type="email" name="email" autocomplete="email" required></label>
-      <button class="primary-button modal-submit" type="submit">Generate reset token</button>
+      <button class="primary-button modal-submit" type="submit">Email reset link</button>
     </form>
 
     <form id="resetForm" class="form-grid hidden" style="grid-template-columns: 1fr;">
-      <label>Reset token<input name="token" autocomplete="off" required></label>
+      <input type="hidden" name="token">
       <label>New password<input type="password" name="password" autocomplete="new-password" minlength="8" required></label>
       <button class="primary-button modal-submit" type="submit">Reset password</button>
     </form>
@@ -48,12 +49,21 @@
 
   <script>
     const authCsrfToken = {{ csrf_token|tojson }};
+    const initialResetToken = {{ reset_token|tojson }};
     const tabs = document.querySelectorAll("[data-auth-tab]");
     const forms = {
       login: document.querySelector("#loginForm"),
       register: document.querySelector("#registerForm"),
       forgot: document.querySelector("#forgotForm")
     };
+
+    if (initialResetToken) {
+      document.querySelector(".ingest-tabs").classList.add("hidden");
+      Object.values(forms).forEach((form) => form.classList.add("hidden"));
+      document.querySelector("#resetForm").classList.remove("hidden");
+      document.querySelector("#resetForm [name=token]").value = initialResetToken;
+      document.querySelector("#authMessage").textContent = "Choose a new password to continue.";
+    }
 
     tabs.forEach((tab) => tab.addEventListener("click", () => {
       tabs.forEach((item) => item.classList.toggle("active", item === tab));
@@ -106,10 +116,6 @@
       try {
         const result = await submitAuth("/api/auth/forgot", forms.forgot);
         document.querySelector("#authMessage").textContent = result.message;
-        if (result.reset_token) {
-          document.querySelector("#resetForm").classList.remove("hidden");
-          document.querySelector("#resetForm [name=token]").value = result.reset_token;
-        }
       } catch (err) {
         document.querySelector("#authError").textContent = err.message;
       }
@@ -119,7 +125,7 @@
       event.preventDefault();
       try {
         const result = await submitAuth("/api/auth/reset", document.querySelector("#resetForm"));
-        document.querySelector("#authMessage").textContent = result.message;
+        window.location.assign(result.redirect || "/auth/account");
       } catch (err) {
         document.querySelector("#authError").textContent = err.message;
       }

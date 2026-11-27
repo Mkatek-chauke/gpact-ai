@@ -20,6 +20,12 @@ Open [http://127.0.0.1:5000](http://127.0.0.1:5000). `LOCAL_JSON_STORE=1` forces
 
 Copy `.env.example` to `.env` for local settings. Never commit `.env` or paste secrets into source files.
 
+### Password reset emails for local demo accounts
+
+The local demo's **Forgot password** form sends a one-time reset link through Resend. Configure `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `PUBLIC_BASE_URL` in the private `.env` file. The example sender uses Resend's test domain, which may send only to recipients allowed by your Resend account; use a verified sender domain for broader delivery. The reset token is held in memory, so this flow is for local demos only. Production accounts use Microsoft Entra's password-recovery flow instead.
+
+If a Resend API key was pasted into chat or another shared channel, revoke it and create a replacement before configuring the app. Never commit the replacement key.
+
 ## Microsoft Entra sign-in
 
 Production use requires an Entra app registration and these server environment variables: `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_CLIENT_SECRET`, `ENTRA_REDIRECT_URI`, and a high-entropy `FLASK_SECRET_KEY`. Register the exact redirect URI `https://<your-domain>/auth/callback`; use the local URI shown in `.env.example` for local sign-in. Configure app roles named `Citizen`, `Officer`, `Manager`, and `Administrator`, or set `ENTRA_GROUP_ROLE_MAP` to a JSON mapping of Entra group object IDs to those roles. Unrecognized or missing roles receive Citizen access. Never put client secrets in browser code.
@@ -49,7 +55,9 @@ Vercel hosting and Neon are cloud services; requests and any indexed public docu
 
 ## Optional Groq and Neo4j integrations
 
-These are not required for Neon Postgres or for the local extractive-answer mode. Neo4j remains an optional metadata mirror; Groq is used only for eligible public-source answer phrasing.
+Groq is optional for local extractive answers and eligible public-source answer phrasing. With `GROQ_WEB_SEARCH_ENABLED=1`, Groq's built-in browser search also searches the configured official-domain allowlist (`GROQ_SEARCH_DOMAINS`) for regular chats using **All Government Sources** or **Department Websites**. The default allowlist is `gov.za` and `nsfas.org.za`; administrators can add verified official domain roots. This uses the same `GROQ_API_KEY`; no separate search-provider key is required. The search model defaults to `openai/gpt-oss-120b`.
+
+Live results are temporary, linked to their official pages, and marked **Unverified** because the app does not import or validate their version/status. They are combined with matching authorized project documents and are not saved to the corpus. Document-specific chats and chats with matching non-public project content do not call web search. Queries and public result excerpts are sent to Groq; personal-data queries are blocked by the existing safeguard. Keep `GROQ_WEB_SEARCH_ENABLED=0` to disable live search.
 
 ## Included features
 
@@ -64,7 +72,7 @@ These are not required for Neon Postgres or for the local extractive-answer mode
 - Gov.za imports are restricted to the `gov.za`/`www.gov.za` hosts, HTTPS, public classification, 15 MB PDFs, one to five documents per request, and readable PDF text.
 - The ingestion dialog can also load the current national-department website directory from gov.za and import up to two policy-related PDFs from one selected department per run. It stays on the directory-listed HTTPS host, checks robots.txt, and marks publication currency as `Unverified`; check the original source before relying on it.
 - Citations for imported public PDFs open the original PDF, with the department page retained as additional source context. Scanned/image-only PDFs need OCR tooling to be configured; otherwise they cannot be indexed as text.
-- Chat searches only indexed project documents that the user is authorised to access; it does not browse live websites or use hardcoded source URLs. Retrieval tolerates common spelling and wording differences. When configured, Groq phrases answers only from retrieved excerpts; if AI generation fails citation checks or is unavailable, the UI identifies the extractive fallback. If no relevant evidence is found, the assistant returns: "I couldn't find supporting information for that question in the official government sources currently available."
+- Chat searches authorized project documents and, when enabled and selected, official government websites through Groq's browser-search tool. Search is domain-restricted, result links are shown in citations, and live results are marked Unverified. Retrieval tolerates common spelling and wording differences. Groq phrases answers only from retrieved excerpts; if AI generation fails citation checks or is unavailable, the UI identifies the extractive fallback. If no relevant evidence is found, the assistant returns: "I couldn't find supporting information for that question in the official government sources currently available."
 - The department importer is deliberately bounded to one policy-related page and two PDFs per request; check original sources before relying on them.
 - No question history is persisted, and source/query content is not written to application logs. Decision requests are answered with policy information rather than an approval/rejection.
 - Uploaded PDFs are limited to 200 pages; scanned PDFs are limited to 40 pages and OCR uses one worker, 150 DPI, and a 30-second conversion timeout. Tesseract and Poppler must be installed locally for scanned-PDF OCR.
