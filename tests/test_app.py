@@ -142,6 +142,7 @@ class AssistantApiTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 200)
                     result = response.get_json()
                     self.assertIn("[C1]", result["answer"])
+                    self.assertTrue(result["provider"].startswith("Official gov.za search"))
                     self.assertEqual(result["citations"][0]["classification"], "Public")
                     self.assertEqual(
                         result["citations"][0]["source_url"],

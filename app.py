@@ -542,12 +542,19 @@ def chat():
             answer, passages, provider = answer_question(
                 question, history, official_documents, clearance
             )
+            provider = f"Official gov.za search · {provider}"
         elif lookup_unavailable:
             answer = (
                 "I couldn't reach the official South African Government website search. "
                 "Please try again later; I couldn't find supporting information in the indexed documents."
             )
             provider = "Official government search unavailable"
+        else:
+            answer = (
+                "I couldn't find supporting information in the indexed documents or matching "
+                "pages on the official South African Government website."
+            )
+            provider = "Official gov.za search"
     audit_event(
         "chat",
         outcome="answered" if passages else (
