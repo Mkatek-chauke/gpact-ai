@@ -206,8 +206,11 @@ function addUserMessage(text) {
 function renderAnswer(result) {
   const message = document.createElement("div");
   message.className = "message";
+  const hasEvidence = result.citations.length > 0;
   const citedAnswer = escapeHtml(result.answer).replace(/\[(C\d+)\]/g, '<a href="#citation-$1">$1</a>');
-  const warnings = result.warnings.map((warning) => `<div class="warning">⚠ ${escapeHtml(warning)}</div>`).join("");
+  const warnings = hasEvidence
+    ? result.warnings.map((warning) => `<div class="warning">⚠ ${escapeHtml(warning)}</div>`).join("")
+    : "";
   const citedDocumentIds = new Set(result.citations.map((citation) => citation.document_id));
   const citations = result.citations.length ? `
     <div class="citation-panel"><h3>SOURCES USED · ${result.citations.length}</h3>
@@ -218,24 +221,26 @@ function renderAnswer(result) {
         </a>`).join("")}
     </div>` : "";
   const relatedDocuments = (result.related_documents || []).filter((doc) => !citedDocumentIds.has(doc.id));
-  const related = `
+  const related = hasEvidence ? `
     <div class="related-panel"><h3>RELATED DOCUMENTS</h3>
       ${relatedDocuments.length ? relatedDocuments.map((doc) => `
         <a class="related-document" href="/documents/${encodeURIComponent(doc.id)}">
           <strong>${escapeHtml(doc.title)}</strong>
           <small>${escapeHtml(doc.document_type)} · v${escapeHtml(doc.version)} · ${escapeHtml(doc.repository)}</small>
         </a>`).join("") : '<p>No additional related documents were found in the selected sources.</p>'}
-    </div>`;
+    </div>` : "";
   const confidence = result.confidence_score == null ? "—" : `${result.confidence_score}%`;
   const department = result.relevant_department || "Not identified in the matched source metadata";
-  message.innerHTML = `<div class="assistant-head"><span class="assistant-mark">G</span><strong>GPACT Assistant</strong><small>· ${escapeHtml(result.provider)}</small></div>
-    ${warnings}<div class="answer-panel"><strong>AI Answer</strong><div class="answer-text">${citedAnswer}</div></div>
+  const answerMetadata = hasEvidence ? `
     <div class="answer-metrics">
       <div><small>Confidence Score</small><strong>${confidence}</strong><span>Retrieval match only; not a measure of correctness.</span></div>
       <div><small>Relevant Government Department</small><strong>${escapeHtml(department)}</strong></div>
     </div>
     ${citations}${related}
-    <div class="answer-footer">${escapeHtml(result.disclaimer)}</div>`;
+    <div class="answer-footer">${escapeHtml(result.disclaimer)}</div>` : "";
+  message.innerHTML = `<div class="assistant-head"><span class="assistant-mark">G</span><strong>GPACT Assistant</strong><small>· ${escapeHtml(result.provider)}</small></div>
+    ${warnings}<div class="answer-panel"><strong>AI Answer</strong><div class="answer-text">${citedAnswer}</div></div>
+    ${answerMetadata}`;
   conversation.append(message);
 }
 

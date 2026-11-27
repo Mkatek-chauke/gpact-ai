@@ -1,19 +1,31 @@
 import re
 import logging
 from collections import Counter
+from difflib import SequenceMatcher
 
 from integrations import groq_answer
 
 logger = logging.getLogger(__name__)
 WORD_RE = re.compile(r"[a-z0-9][a-z0-9'-]*", re.I)
+NO_EVIDENCE_ANSWER = (
+    "I couldn't find supporting information for that question in the official government sources currently available."
+)
 STOP_WORDS = {
     "a", "about", "after", "also", "an", "and", "are", "as", "at", "be",
-    "before", "can", "could", "did", "do", "does", "for", "from", "had",
+    "before", "can", "could", "did", "do", "does", "for", "from", "get", "had",
     "has", "have", "how", "in", "into", "is", "it", "its", "may", "might",
-    "happen", "must", "not", "of", "on", "or", "our", "required", "should", "that", "the", "their",
+    "happen", "happed", "i", "must", "not", "of", "on", "or", "our", "required", "should", "that", "the", "their",
     "them", "there", "these", "this", "those", "to", "under", "was", "were",
     "what", "when", "where", "which", "who", "why", "will", "with", "would",
-    "using", "you", "your",
+    "using", "you", "your", "s",
+}
+QUERY_SYNONYMS = {
+    "age": {"older", "elderly", "senior"},
+    "arrest": {"arrested", "detained", "detention"},
+    "apply": {"application", "applying"},
+    "id": {"identity", "identification", "document", "smart"},
+    "nsfas": {"national", "student", "financial", "aid", "bursary", "funding"},
+    "old": {"older", "elderly", "senior"},
 }
 PERSONAL_DATA_RE = re.compile(
     r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|"
@@ -32,7 +44,13 @@ DECISION_REQUEST_RE = re.compile(
     re.I,
 )
 HISTORICAL_VERSION_RE = re.compile(
-    r"\b(?:superseded|previous|older|historical|version\s*\d|v\d)\b",
+    r"\b(?:superseded|previous|older\s+(?:version|policy|document|edition)|historical|version\s*\d|v\d)\b",
+    re.I,
+)
+FOLLOW_UP_CONTEXT_RE = re.compile(
+    r"\b(?:it|they|them|their|this|that|those|these|there|then|same|former|latter|above)\b|"
+    r"\bwhat about (?:it|that|those|these|the same|then)\b|"
+    r"\b(?:tell me|say|explain) more\b",
     re.I,
 )
 DOCUMENT_SUMMARY_RE = re.compile(
@@ -42,7 +60,37 @@ DOCUMENT_SUMMARY_RE = re.compile(
 
 
 def tokenize(text):
-    return [word.lower() for word in WORD_RE.findall(text) if word.lower() not in STOP_WORDS]
+    words = []
+    for raw_word in WORD_RE.findall(text):
+        word = raw_word.lower()
+        if word == "happed":
+            word = "happen"
+        elif word.endswith("ies") and len(word) > 4:
+            word = f"{word[:-3]}y"
+        elif word.endswith("ied") and len(word) > 4:
+            word = f"{word[:-3]}y"
+        elif word.endswith("ed") and len(word) > 5:
+            word = word[:-2]
+        elif word.endswith("s") and len(word) > 4:
+            word = word[:-1]
+        if word not in STOP_WORDS:
+            words.append(word)
+    return words
+
+
+def _query_term_matches(term, document_words):
+    candidates = QUERY_SYNONYMS.get(term, set()) | {term}
+    if candidates.intersection(document_words):
+        return True
+    if len(term) < 4:
+        return False
+    return any(
+        len(word) >= 4
+        and word[0] == term[0]
+        and abs(len(word) - len(term)) <= 2
+        and SequenceMatcher(None, term, word).ratio() >= 0.78
+        for word in document_words
+    )
 
 
 def make_chunks(document):
@@ -105,7 +153,7 @@ def rank_passages(question, documents, clearance):
         for chunk in make_chunks(document):
             words = tokenize(f'{chunk["text"]} {chunk["section"]} {document["title"]}')
             counts = Counter(words)
-            overlap = terms.intersection(counts)
+            overlap = {term for term in terms if _query_term_matches(term, counts)}
             if len(overlap) < min(2, len(terms)):
                 continue
             score = len(overlap) / len(terms)
@@ -143,21 +191,14 @@ def rank_passages(question, documents, clearance):
 
 def _fallback_answer(passages):
     if not passages:
-        return (
-            "I couldn't find supporting information for that question in the documents "
-            "you are authorised to access. Please check with your departmental policy "
-            "owner or records officer."
-        )
+        return NO_EVIDENCE_ANSWER
     lines = []
     for item in passages[:3]:
         sentences = re.split(r"(?<=[.!?])\s+", item["text"])
         useful = next((sentence.strip() for sentence in sentences if sentence.strip()), "")
         if useful:
             lines.append(f'{useful} [{item["ref"]}]')
-    return " ".join(lines) or (
-        "I couldn't find supporting information in the documents you are authorised to access. "
-        "Please check with your departmental policy owner or records officer."
-    )
+    return " ".join(lines) or NO_EVIDENCE_ANSWER
 
 
 def _document_passages(documents, clearance):
@@ -209,10 +250,15 @@ def answer_question(question, history, documents, clearance, document_context=Fa
         for item in history[-4:]
         if isinstance(item, dict) and item.get("role") == "user" and isinstance(item.get("content"), str)
     )
-    passages = rank_passages(f"{follow_up_context} {question}", documents, clearance)
+    retrieval_question = question
+    if follow_up_context and FOLLOW_UP_CONTEXT_RE.search(question):
+        retrieval_question = f"{follow_up_context} {question}"
+    passages = rank_passages(retrieval_question, documents, clearance)
     is_document_summary = document_context and DOCUMENT_SUMMARY_RE.search(question)
     if is_document_summary:
         passages = _document_passages(documents, clearance)
+    if not passages:
+        return NO_EVIDENCE_ANSWER, [], "Local extractive retrieval"
     if DECISION_REQUEST_RE.search(question):
         prefix = (
             "I can't approve, reject, or make a procurement decision. "
@@ -223,8 +269,6 @@ def answer_question(question, history, documents, clearance, document_context=Fa
                 + "I can provide the policy information for an authorised official to assess: "
                 + _fallback_answer(passages)
             )
-        else:
-            answer = prefix + _fallback_answer(passages)
         return answer, passages, "Local decision safeguard"
     answer = None
     provider = "Local extractive retrieval"
@@ -241,13 +285,20 @@ def answer_question(question, history, documents, clearance, document_context=Fa
                 if is_document_summary else question
             )
             candidate = groq_answer(provider_question, [], passages)
+            if candidate and candidate.strip() == NO_EVIDENCE_ANSWER:
+                return NO_EVIDENCE_ANSWER, [], "Groq"
             if candidate and _all_sentences_cited(candidate, passages):
                 answer = candidate
                 provider = "Groq"
             elif candidate:
                 logger.warning("Groq answer omitted required source citations; using local answer.")
-        except Exception:
-            logger.warning("Groq provider unavailable; using local extractive retrieval.")
+                provider = "Local extractive retrieval (AI answer rejected)"
+        except Exception as exc:
+            logger.warning(
+                "Groq provider unavailable (%s); using local extractive retrieval.",
+                type(exc).__name__,
+            )
+            provider = "Local extractive retrieval (AI provider unavailable)"
             answer = None
     if answer is None:
         answer = _fallback_answer(passages)

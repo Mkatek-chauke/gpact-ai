@@ -846,6 +846,10 @@ def chat():
             current_versions[key] = document["version"]
     citations = []
     warnings = []
+    if provider == "Local extractive retrieval (AI provider unavailable)":
+        warnings.append("AI answer generation is unavailable; the response was extracted from the cited passages.")
+    elif provider == "Local extractive retrieval (AI answer rejected)":
+        warnings.append("The AI answer failed citation checks; the response was extracted from the cited passages.")
     for item in passages:
         citation = {
             "ref": item["ref"],
